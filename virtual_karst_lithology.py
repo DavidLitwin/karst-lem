@@ -7,8 +7,9 @@ and use the lithologic contact to determine where there will be springs.
 """
 
 #%%
-import copy
 import os
+import copy
+import pickle
 import numpy as np
 
 import matplotlib.pyplot as plt
@@ -138,9 +139,13 @@ layer_ids = [0,1]
 attrs = {"K_loss": {0: 0.5, 1: 0.0}}
 
 lith = LithoLayers(
-    mg, layer_elevations, layer_ids, function=lambda x, y: 0.002 * y, attrs=attrs
+    mg, layer_elevations, layer_ids, function=lambda x, y: - 0.002 * y, attrs=attrs
 )
-mg.imshow("rock_type__id", cmap="viridis")
+# mg.imshow("rock_type__id", cmap="viridis")
+
+# z bottom is the distance from the surface to the layer, so we want shorter distances
+# at the top of the domain
+mg.imshow(lith.z_bottom[1,:])
 
 #%%
 # define the loss based on the lithology dependent K_loss field
@@ -246,7 +251,7 @@ Q = mg.at_node['surface_water__discharge']
 
 #%% run forward
 
-N = 5000
+N = 4000
 R = np.zeros(N)
 dt = 500
 
@@ -301,15 +306,15 @@ for i in range(N):
 # topography
 plt.figure()
 mg.imshow("topographic__elevation", colorbar_label='Elevation [m]')
-# plt.savefig(os.path.join(save_directory,"litholayers_topog_springs_0.5.png"))
+plt.savefig(os.path.join(save_directory,"litholayers_topog_springs_0.5.png"))
 
 plt.figure()
 mg.imshow("rock_type__id", cmap="viridis", colorbar_label='Rock ID')
-# plt.savefig(os.path.join(save_directory,"litholayers_rocks_springs_0.5.png"))
+plt.savefig(os.path.join(save_directory,"litholayers_rocks_springs_0.5.png"))
 
 plt.figure()
 mg.imshow('surface_water__discharge', cmap="plasma", colorbar_label='Discharge')
-# plt.savefig(os.path.join(save_directory,"litholayers_discharge_springs_0.5.png"))
+plt.savefig(os.path.join(save_directory,"litholayers_discharge_springs_0.5.png"))
 
 
 #%%
@@ -352,7 +357,7 @@ ax0.set_xlabel('X [m]')
 ax0.set_ylabel('Y [m]')
 ax1.set_xlabel('Z [m]')
 f.tight_layout()
-# plt.savefig(os.path.join(save_directory,"litholayers_hillshade_springs_0.5.png"))
+plt.savefig(os.path.join(save_directory,"litholayers_hillshade_springs_0.5.png"))
 
 #%%
 
@@ -448,5 +453,15 @@ mg.imshow(lith.dz[1,:]>0)
 
 # %%
 plt.figure()
-mg.imshow("rock_type__id")
+mg.imshow("rock_type__id", alpha=0.5)
+
+
+# %% pickle grid and lithology model for gdp testing
+
+pickle_dir = '/Users/dlitwin/Documents/Research/Karst landscape evolution/landlab_virtual_karst'
+with open(os.path.join(pickle_dir,'lith.pkl'), 'wb') as file:
+    pickle.dump(lith, file)
+
+with open(os.path.join(pickle_dir,'grid.pkl'), 'wb') as file:
+    pickle.dump(mg, file)
 # %%
