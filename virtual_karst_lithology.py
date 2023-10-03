@@ -129,6 +129,7 @@ mg.set_closed_boundaries_at_grid_edges(right_is_closed=True,
                                        bottom_is_closed=False)
 
 bottom_nodes = mg.nodes_at_bottom_edge
+top_nodes = mg.nodes_at_top_edge
 z = mg.add_zeros("node", "topographic__elevation")
 np.random.seed(10010)
 z += 0.1*np.random.rand(len(z))
@@ -262,6 +263,7 @@ lower_bndry = np.arange(0, mg.number_of_node_columns)
 
 dz_ad = np.zeros(mg.size("node"))
 dz_ad[mg.core_nodes] = U * dt
+dz_ad[top_nodes] += 0.5 * U * dt # effectively decrease the baselevel fall rate of the upper boundary
 
 save_freq = 50
 Ns = N//save_freq
@@ -357,7 +359,7 @@ ax0.set_xlabel('X [m]')
 ax0.set_ylabel('Y [m]')
 ax1.set_xlabel('Z [m]')
 f.tight_layout()
-plt.savefig(os.path.join(save_directory,"litholayers_hillshade_springs_0.5.png"))
+plt.savefig(os.path.join(save_directory,"litholayers_hillshade_springs_0.5_blevel.png"))
 
 #%%
 
