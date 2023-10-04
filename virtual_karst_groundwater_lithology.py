@@ -35,7 +35,7 @@ D = 1e-3
 
 #%% set up grid and lithology
 
-mg = RasterModelGrid((200,300), xy_spacing=25)
+mg = RasterModelGrid((100,150), xy_spacing=50)
 mg.set_closed_boundaries_at_grid_edges(right_is_closed=True,
                                        left_is_closed=True,
                                        top_is_closed=False,
@@ -58,13 +58,15 @@ lith = LithoLayers(
     mg, layer_elevations, layer_ids, function=lambda x, y: - 0.002 * y, attrs=attrs
 )
 
+# we just start with aquifer base at the base of the limestone, because limestone
+# covers the whole surface
 rock_id = 1
 zb = mg.add_zeros('node', 'aquifer_base__elevation')
 zb[:] = z - lith.z_bottom[rock_id,:]
-zb[mg.open_boundary_nodes] = z[mg.open_boundary_nodes] - 0.10
-zb[basement_not_contact] = zb[basement_not_contact] - 0.10
+# zb[mg.open_boundary_nodes] = z[mg.open_boundary_nodes] - 0.10
+# zb[basement_not_contact] = z[basement_not_contact] - 0.10
 zwt = mg2.add_zeros('node', 'water_table__elevation')
-zwt[mg2.core_nodes] = zb[mg2.core_nodes] + 0.01
+zwt[mg2.core_nodes] = z[mg2.core_nodes] - 0.1
 
 
 #%%
@@ -79,7 +81,7 @@ fd = FlowDirectorD8(mg)
 fa = FlowAccumulator(
     mg,
     surface="topographic__elevation",
-    flow_director=fd2,
+    flow_director=fd,
     runoff_rate="surface_water__specific_discharge",
 )
 lmb = LakeMapperBarnes(
@@ -99,33 +101,44 @@ ld = LinearDiffuser(mg, linear_diffusivity=D)
 
 lmb2.run_one_step()
 
-Q = mg.at_node['surface_water__discharge']
-
 
 
 #%% run forward
 
 N = 4000
 R = np.zeros(N)
-dt = 500
-
-a0 = mg.cell_area_at_node[mg.core_nodes][0]
-area = mg.at_node['drainage_area']
-q_loss = mg.at_node["surface_water__discharge_loss"]
-lower_bndry = np.arange(0, mg.number_of_node_columns)
+dt = 500 # years
+dt_gw = 24 * 3600 # seconds
 
 dz_ad = np.zeros(mg.size("node"))
 dz_ad[mg.core_nodes] = U * dt
-dz_ad[top_nodes] += 0.5 * U * dt # effectively decrease the baselevel fall rate of the upper boundary
+# dz_ad[top_nodes] += 0.5 * U * dt # effectively decrease the baselevel fall rate of the upper boundary
 
 save_freq = 50
 Ns = N//save_freq
 z_all = np.zeros((len(z),Ns))
 rock_id_all = np.zeros((len(z),Ns))
 
+first_wtdelta = np.zeros(N)
+wt_iterations = np.zeros(N)
+
+
 for i in range(N):
 
     lmb2.run_one_step()
+
+    wt_delta = 1
+    wt_iter = 0
+    while wt_delta > 1e-4:
+
+        zwt0 = zwt.copy()
+        gdp.run_with_adaptive_time_step_solver(dt_gw)
+        wt_delta = np.max(np.abs(zwt0 - zwt))/(dt_gw/3600)
+
+        if wt_iter == 0:
+            first_wtdelta[i] = wt_delta
+        wt_iter += 1
+    wt_iterations[i] = wt_iter
 
     # update areas
     fa2.run_one_step()
@@ -135,17 +148,18 @@ for i in range(N):
     ld2.run_one_step(dt)
     z += dz_ad
 
+    # update lithologic model
     lith.rock_id = 0
     lith.dz_advection = dz_ad
     lith.run_one_step()
 
-    # calculate spring discharge that will be used next time
-    total_loss = np.sum(q_loss)
-    contact = find_contact(mg, lith)
-    lower_drainage = get_divide_mask(mg, lower_bndry)
-    lower_contact = np.logical_and(contact, lower_drainage)
-    Q_spring = area_weighted_springs(mg, lower_contact, total_loss)
-    q[:] = 1 + Q_spring/a0
+    # update lower aquifer boundary condition
+    zb[mg2.core_nodes] = ((z - lith.z_bottom[rock_id,:]) - mg2.at_node[weathered_thickness])[mg2.core_nodes]
+    ## something to handle boundary nodes (because lith thickness there is not updated)
+
+    # something to handle the aquifer itself - see regolith models in DupuitLEM
+    # this should cover it, but again check boundary conditions
+    zwt[mg2.core_nodes] = (zb + gdp2._thickness)[mg2.core_nodes]
 
     # metrics of change
     R[i] = np.mean(z[mg.core_nodes])
