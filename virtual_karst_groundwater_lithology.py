@@ -3,6 +3,10 @@ More complex test of virtual karst in landlab. Use the Lithology component to
 track two layers: a limestone layer, and a basement. Now use the thicknesses and
 permeabilities of those lithologies to parametrize a GroundwaterDupuitPercolator
 model.
+
+Experiment with some partial partitioning - may need to allow some amount of 
+surface runoff in order to get incision to begin with. Part of the challenge here
+is that karst will change conductivity with age, which we are not capturing yet.
 """
 
 import os
@@ -65,8 +69,8 @@ zb = mg.add_zeros('node', 'aquifer_base__elevation')
 zb[:] = z - lith.z_bottom[rock_id,:]
 # zb[mg.open_boundary_nodes] = z[mg.open_boundary_nodes] - 0.10
 # zb[basement_not_contact] = z[basement_not_contact] - 0.10
-zwt = mg2.add_zeros('node', 'water_table__elevation')
-zwt[mg2.core_nodes] = z[mg2.core_nodes] - 0.1
+zwt = mg.add_zeros('node', 'water_table__elevation')
+zwt[mg.core_nodes] = z[mg.core_nodes] - 0.1
 
 
 #%%
@@ -99,7 +103,7 @@ lmb = LakeMapperBarnes(
 fs = FastscapeEroder(mg, K_sp=K, discharge_field='surface_water__discharge')
 ld = LinearDiffuser(mg, linear_diffusivity=D)
 
-lmb2.run_one_step()
+lmb.run_one_step()
 
 
 
@@ -125,7 +129,7 @@ wt_iterations = np.zeros(N)
 
 for i in range(N):
 
-    lmb2.run_one_step()
+    lmb.run_one_step()
 
     wt_delta = 1
     wt_iter = 0
@@ -141,11 +145,11 @@ for i in range(N):
     wt_iterations[i] = wt_iter
 
     # update areas
-    fa2.run_one_step()
+    fa.run_one_step()
 
     # update topography
-    fs2.run_one_step(dt)
-    ld2.run_one_step(dt)
+    fs.run_one_step(dt)
+    ld.run_one_step(dt)
     z += dz_ad
 
     # update lithologic model
@@ -154,12 +158,12 @@ for i in range(N):
     lith.run_one_step()
 
     # update lower aquifer boundary condition
-    zb[mg2.core_nodes] = ((z - lith.z_bottom[rock_id,:]) - mg2.at_node[weathered_thickness])[mg2.core_nodes]
+    zb[mg.core_nodes] = ((z - lith.z_bottom[rock_id,:]) - mg.at_node["weathered_thickness"])[mg.core_nodes]
     ## something to handle boundary nodes (because lith thickness there is not updated)
 
     # something to handle the aquifer itself - see regolith models in DupuitLEM
     # this should cover it, but again check boundary conditions
-    zwt[mg2.core_nodes] = (zb + gdp2._thickness)[mg2.core_nodes]
+    zwt[mg.core_nodes] = (zb + gdp._thickness)[mg.core_nodes]
 
     # metrics of change
     R[i] = np.mean(z[mg.core_nodes])
