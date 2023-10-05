@@ -9,26 +9,30 @@ surface runoff in order to get incision to begin with. Part of the challenge her
 is that karst will change conductivity with age, which we are not capturing yet.
 """
 
+#%%
+
 import os
 import copy
 import pickle
 import numpy as np
 
 import matplotlib.pyplot as plt
-from matplotlib import cm
+from matplotlib.colors import LightSource
 
 from landlab import RasterModelGrid
 from landlab.components import (
     FastscapeEroder, 
     FlowAccumulator,
-    LossyFlowAccumulator, 
     FlowDirectorD8,
     LakeMapperBarnes,
     LinearDiffuser,
     LithoLayers,
     GroundwaterDupuitPercolator,
 )
-from landlab.grid.mappers import map_max_of_node_links_to_node
+from landlab.grid.mappers import map_value_at_max_node_to_link
+
+save_directory = '/Users/dlitwin/Documents/Research/Karst landscape evolution/landlab_virtual_karst/figures'
+
 
 #%% parameters
 
@@ -56,7 +60,7 @@ z += 0.1*np.random.rand(len(z))
 # basement that will host the aquifer there. In the limestone, the aquifer is just the whole unit.
 layer_elevations = [100,1000]
 layer_ids = [0,1]
-attrs = {"Ksat": {0: 1e-3, 1: 1e-4}, "weathered_thickness": {0: 0.0, 1: 0.5}}
+attrs = {"Ksat_node": {0: 1e-4, 1: 1e-5}, "weathered_thickness": {0: 0.0, 1: 0.5}}
 
 lith = LithoLayers(
     mg, layer_elevations, layer_ids, function=lambda x, y: - 0.002 * y, attrs=attrs
@@ -67,10 +71,12 @@ lith = LithoLayers(
 rock_id = 1
 zb = mg.add_zeros('node', 'aquifer_base__elevation')
 zb[:] = z - lith.z_bottom[rock_id,:]
-# zb[mg.open_boundary_nodes] = z[mg.open_boundary_nodes] - 0.10
-# zb[basement_not_contact] = z[basement_not_contact] - 0.10
 zwt = mg.add_zeros('node', 'water_table__elevation')
 zwt[mg.core_nodes] = z[mg.core_nodes] - 0.1
+
+# Lithology model tracks Ksat at nodes, but gdp needs ksat at links
+ks = mg.add_zeros("link", "Ksat")
+ks[:] = map_value_at_max_node_to_link(mg, "water_table__elevation", "Ksat_node")
 
 
 #%%
@@ -78,7 +84,7 @@ zwt[mg.core_nodes] = z[mg.core_nodes] - 0.1
 
 gdp = GroundwaterDupuitPercolator(
     mg, 
-    hydraulic_conductivity="Ksat",
+    hydraulic_conductivity='Ksat',
     recharge_rate=3e-8 # ~ 1 m/yr
 )
 fd = FlowDirectorD8(mg)
@@ -112,7 +118,7 @@ lmb.run_one_step()
 N = 4000
 R = np.zeros(N)
 dt = 500 # years
-dt_gw = 24 * 3600 # seconds
+dt_gw = 10 * 24 * 3600 # seconds
 
 dz_ad = np.zeros(mg.size("node"))
 dz_ad[mg.core_nodes] = U * dt
@@ -157,6 +163,9 @@ for i in range(N):
     lith.dz_advection = dz_ad
     lith.run_one_step()
 
+    # map new ksat to link
+    ks[:] = map_value_at_max_node_to_link(mg, "water_table__elevation", "Ksat_node")
+
     # update lower aquifer boundary condition
     zb[mg.core_nodes] = ((z - lith.z_bottom[rock_id,:]) - mg.at_node["weathered_thickness"])[mg.core_nodes]
     ## something to handle boundary nodes (because lith thickness there is not updated)
@@ -173,3 +182,59 @@ for i in range(N):
 
         z_all[:,i//save_freq] = z
         rock_id_all[:,i//save_freq] = mg.at_node['rock_type__id']
+
+
+# %% plot topogrpahic change
+
+# topography
+plt.figure()
+mg.imshow("topographic__elevation", colorbar_label='Elevation [m]')
+plt.savefig(os.path.join(save_directory,"lith_gdp_topog.png"))
+
+plt.figure()
+mg.imshow("rock_type__id", cmap="viridis", colorbar_label='Rock ID')
+plt.savefig(os.path.join(save_directory,"lith_gdp_rocks.png"))
+
+Q_an = mg.at_node['surface_water__discharge']/mg.at_node['drainage_area']
+plt.figure()
+mg.imshow('surface_water__discharge', cmap="plasma", colorbar_label='Discharge')
+plt.savefig(os.path.join(save_directory,"lith_gdp_discharge.png"))
+
+
+
+#%%
+
+plt.figure()
+# mg.imshow('aquifer__thickness', cmap="plasma", colorbar_label='thickness')
+mg.imshow('water_table__elevation', cmap="plasma", colorbar_label='WT Elevation')
+#%%
+# hillshade
+
+elev = mg.at_node['topographic__elevation'].copy()
+elev[mg.boundary_nodes] = np.nan
+y = np.arange(mg.shape[0] + 1) * mg.dx - mg.dx * 0.5
+x = np.arange(mg.shape[1] + 1) * mg.dy - mg.dy * 0.5
+
+elev_plot = elev.reshape(mg.shape)
+elev_profile = np.nanmean(elev_plot, axis=1)
+
+f, (ax0, ax1) = plt.subplots(1, 2, width_ratios=[4, 1], figsize=(10,5))
+ls = LightSource(azdeg=135, altdeg=45)
+ax0.imshow(
+        ls.hillshade(elev_plot, 
+            vert_exag=1, 
+            dx=mg.dx, 
+            dy=mg.dy), 
+        origin="lower", 
+        extent=(x[0], x[-1], y[0], y[-1]), 
+        cmap='gray',
+        )
+for i in range(mg.shape[1]):
+    ax1.plot(elev_plot[:,i], y[0:-1], alpha=0.1, color='k')
+ax1.plot(elev_profile, y[0:-1], linewidth=2, color='r')
+
+ax0.set_xlabel('X [m]')
+ax0.set_ylabel('Y [m]')
+ax1.set_xlabel('Z [m]')
+f.tight_layout()
+plt.savefig(os.path.join(save_directory,"lith_gdp_hillshade.png"))
