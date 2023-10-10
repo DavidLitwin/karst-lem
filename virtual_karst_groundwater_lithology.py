@@ -30,16 +30,42 @@ from landlab.components import (
     GroundwaterDupuitPercolator,
 )
 from landlab.grid.mappers import map_value_at_max_node_to_link
+from landlab.io.netcdf import to_netcdf
 
-save_directory = '/Users/dlitwin/Documents/Research/Karst landscape evolution/landlab_virtual_karst/figures'
-
+fig_directory = '/Users/dlitwin/Documents/Research/Karst landscape evolution/landlab_virtual_karst/figures'
+save_directory = '/Users/dlitwin/Documents/Research Data/Local/karst_lem'
+id = "test_1"
 
 #%% parameters
 
-U = 1e-4
-K = 1e-5
-D = 1e-3
+U = 1e-4 # uplift m/yr
+K = 1e-5 # streampower incision (yr^...)
+D = 1e-3 # diffusivity (m2/yr)
 
+b_limestone = 20 # limestone unit thickness (m)
+b_basement = 1000 # basement thickness (m)
+bed_dip = 0.002 # dip of bed (positive = toward bottom boundary)
+ksat_limestone = 1e-5 # ksat limestone (m/s)
+ksat_basement = 1e-6 # ksat basement (m/s)
+n_limestone = 0.1 # drainable porosity 
+n_weathered_basement = 0.1 # drainable porosity 
+b_weathered_basement = 0.5 # thickness of regolith that can host aquifer in basement (m)
+
+ie_rate = 1e-8 # infiltration excess average rate (m/s)
+recharge_rate = 2e-8 # recharge rate (m/s)
+
+N = 4000 # number of geomorphic timesteps
+dt = 500 # geomorphic timestep (yr)
+dt_gw = 10 * 24 * 3600 # groundwater timestep (s)
+save_freq = 100 # steps between saving output
+output_fields = [
+        "at_node:topographic__elevation",
+        "at_node:aquifer_base__elevation",
+        "at_node:water_table__elevation",
+        "at_node:surface_water_discharge",
+        "at_node:local_runoff",
+        "at_node:rock_type__id"
+        ]
 
 #%% set up grid and lithology
 
@@ -58,12 +84,15 @@ z += 0.1*np.random.rand(len(z))
 # two layers, both with bottoms below ground. Top layer is limestone, bottom is basement.
 # weathered_thickness is a way to add some somewhat realistic weathered zone in the
 # basement that will host the aquifer there. In the limestone, the aquifer is just the whole unit.
-layer_elevations = [100,1000]
+layer_elevations = [b_limestone,b_basement]
 layer_ids = [0,1]
-attrs = {"Ksat_node": {0: 1e-4, 1: 1e-5}, "weathered_thickness": {0: 0.0, 1: 0.5}}
+attrs = {"Ksat_node": {0: ksat_limestone, 1: ksat_basement}, 
+         "weathered_thickness": {0: 0.0, 1: b_weathered_basement},
+         "porosity": {0: n_limestone, 1: n_weathered_basement}
+         }
 
 lith = LithoLayers(
-    mg, layer_elevations, layer_ids, function=lambda x, y: - 0.002 * y, attrs=attrs
+    mg, layer_elevations, layer_ids, function=lambda x, y: - bed_dip * y, attrs=attrs
 )
 
 # we just start with aquifer base at the base of the limestone, because limestone
@@ -78,6 +107,11 @@ zwt[mg.core_nodes] = z[mg.core_nodes] - 0.1
 ks = mg.add_zeros("link", "Ksat")
 ks[:] = map_value_at_max_node_to_link(mg, "water_table__elevation", "Ksat_node")
 
+# add a local runoff field - both infiltration excess and saturation excess
+q_local = mg.add_zeros("node", "local_runoff")
+
+q_ie = mg.add_zeros("node", "infiltration_excess")
+q_ie[mg.core_nodes] = ie_rate
 
 #%%
 
@@ -85,14 +119,15 @@ ks[:] = map_value_at_max_node_to_link(mg, "water_table__elevation", "Ksat_node")
 gdp = GroundwaterDupuitPercolator(
     mg, 
     hydraulic_conductivity='Ksat',
-    recharge_rate=3e-8 # ~ 1 m/yr
+    porosity="porosity",
+    recharge_rate=recharge_rate
 )
 fd = FlowDirectorD8(mg)
 fa = FlowAccumulator(
     mg,
     surface="topographic__elevation",
     flow_director=fd,
-    runoff_rate="surface_water__specific_discharge",
+    runoff_rate="local_runoff",
 )
 lmb = LakeMapperBarnes(
     mg,
@@ -112,31 +147,23 @@ ld = LinearDiffuser(mg, linear_diffusivity=D)
 lmb.run_one_step()
 
 
-
 #%% run forward
-
-N = 4000
-R = np.zeros(N)
-dt = 500 # years
-dt_gw = 10 * 24 * 3600 # seconds
 
 dz_ad = np.zeros(mg.size("node"))
 dz_ad[mg.core_nodes] = U * dt
 # dz_ad[top_nodes] += 0.5 * U * dt # effectively decrease the baselevel fall rate of the upper boundary
 
-save_freq = 50
 Ns = N//save_freq
-z_all = np.zeros((len(z),Ns))
-rock_id_all = np.zeros((len(z),Ns))
-
+R = np.zeros(N)
 first_wtdelta = np.zeros(N)
 wt_iterations = np.zeros(N)
 
-
 for i in range(N):
 
+    # remove depressions
     lmb.run_one_step()
 
+    # iterate for steady state water table
     wt_delta = 1
     wt_iter = 0
     while wt_delta > 1e-4:
@@ -149,6 +176,9 @@ for i in range(N):
             first_wtdelta[i] = wt_delta
         wt_iter += 1
     wt_iterations[i] = wt_iter
+
+    # local runoff is sum of saturation and infiltration excess. Convert units to m/yr. 
+    q_local[mg.core_nodes] = (mg.at_node['average_surface_water__specific_discharge'][mg.core_nodes] + mg.at_node['infiltration_excess'][mg.core_nodes]) * 3600 * 24 * 365
 
     # update areas
     fa.run_one_step()
@@ -177,11 +207,13 @@ for i in range(N):
     # metrics of change
     R[i] = np.mean(z[mg.core_nodes])
 
+    # save output
     if i%save_freq==0:
         print(f"Finished iteration {i}")
 
-        z_all[:,i//save_freq] = z
-        rock_id_all[:,i//save_freq] = mg.at_node['rock_type__id']
+        # save the specified grid fields
+        filename = os.path.join(save_directory, f"{id}_grid_{i}.nc")
+        to_netcdf(mg, filename, include=output_fields, format="NETCDF4")
 
 
 # %% plot topogrpahic change
@@ -189,16 +221,16 @@ for i in range(N):
 # topography
 plt.figure()
 mg.imshow("topographic__elevation", colorbar_label='Elevation [m]')
-plt.savefig(os.path.join(save_directory,"lith_gdp_topog.png"))
+plt.savefig(os.path.join(fig_directory,"lith_gdp_topog.png"))
 
 plt.figure()
 mg.imshow("rock_type__id", cmap="viridis", colorbar_label='Rock ID')
-plt.savefig(os.path.join(save_directory,"lith_gdp_rocks.png"))
+plt.savefig(os.path.join(fig_directory,"lith_gdp_rocks.png"))
 
 Q_an = mg.at_node['surface_water__discharge']/mg.at_node['drainage_area']
 plt.figure()
 mg.imshow('surface_water__discharge', cmap="plasma", colorbar_label='Discharge')
-plt.savefig(os.path.join(save_directory,"lith_gdp_discharge.png"))
+plt.savefig(os.path.join(fig_directory,"lith_gdp_discharge.png"))
 
 
 
@@ -237,4 +269,4 @@ ax0.set_xlabel('X [m]')
 ax0.set_ylabel('Y [m]')
 ax1.set_xlabel('Z [m]')
 f.tight_layout()
-plt.savefig(os.path.join(save_directory,"lith_gdp_hillshade.png"))
+plt.savefig(os.path.join(fig_directory,"lith_gdp_hillshade.png"))
