@@ -20,51 +20,7 @@ from landlab.components import (
     LakeMapperBarnes,
     LinearDiffuser,
 )
-from landlab.utils import get_watershed_mask
-
-
-def find_nearest(array, value):
-    array = np.asarray(array)
-    idx = (np.abs(array - value)).argmin()
-    return idx, array[idx]
-
-def find_all_near(array, value, tol):
-    
-    array = np.asarray(array)
-    select = np.abs(array-value) < tol
-    inds = np.argwhere(select)
-    
-    return inds, array[inds]
-
-def get_mask_and_large_channels(mg, bnds_lower, bnds_upper, area_thresh):
-    """
-    Create a mask that selects just the points that drain to the lower boundary.
-    Make a dictionary of the large channels draining to the lower boundary and the 
-    upper boundary.
-
-    """
-    area = mg.at_node['drainage_area']
-    lower_mask = np.zeros(len(area))
-
-    lower_channels = {}
-    for i in bnds_lower:
-        mask = get_watershed_mask(mg,i)
-        lower_mask += mask
-        
-        channel = np.argwhere(np.logical_and(mask, area>area_thresh))
-
-        if channel.size > 0:
-            lower_channels[i] = channel
-    
-    upper_channels = {}
-    for i in bnds_upper:
-        mask = get_watershed_mask(mg,i)
-        channel = np.argwhere(np.logical_and(mask, area>area_thresh))
-
-        if channel.size > 0:
-            upper_channels[i] = channel
-
-    return lower_mask, lower_channels, upper_channels
+from virtual_karst_funcs import *
 
 save_directory = '/Users/dlitwin/Documents/Research/karst_lem/landlab_virtual_karst/figures'
 
