@@ -99,3 +99,54 @@ def get_lower_upper_area(mg, bnds_lower, bnds_upper):
     area = mg.at_node['drainage_area']
     return np.sum(area[bnds_lower]), np.sum(area[bnds_upper])
 
+def calc_ksat(n, D, alpha=1.0, rho=1000, g=9.81, mu=0.0010518):
+    """
+    Calculate hydraulic conductivity (m/s) from the parallel capillary model (See Vacher and Mylroie 2002).
+    
+    Parameters:
+    -----------
+    n: porosity (-)
+    D: Equivalent pore diameter (m)
+    alpha: toruosity (-). Default = 1.
+    rho: density of water (kg/m3).
+    g: gravitational acceleration (m/s2).
+    mu: dynamic viscosity (N*s/m2)
+    """    
+
+    return (rho * g * n * D**2)/(32 * mu * alpha**2)
+
+
+def calc_pore_diam_logistic(t, t0, k, D0, Df):
+    """
+    Calculate the equivalent capillary pore diameter assuming a logistic increase in
+    diameter with time.
+
+    Parameters:
+    ----------
+    t: time (T)
+    t0: logistic midpoint (T)
+    k: logistic growth rate/steepness (1/T)
+    D0: initial diameter (L)
+    Df: final diameter (L)
+
+    """
+    return Df / (1 + np.exp(-k*(t-t0))) + D0
+
+def calc_porosity_logistic(t, t0, k, D0, Df, n0, nf):
+    """
+    Calculate porosity assuming a linear increase in porosity with eqivalent pore diameter, and a 
+    logistic increase in equivalent pore diameter with time.
+
+    Parameters:
+    ----------
+    t: time (T)
+    t0: logistic midpoint (T)
+    k: logistic growth rate/steepness (1/T)
+    D0: initial diameter (L)
+    Df: final diameter (L)
+    n0: initial porosity (-)
+    nf: final porosity (-)
+    """
+
+    return (nf - n0)/(Df - D0) * (Df / (1 + np.exp(-k*(t-t0)))) + n0
+
