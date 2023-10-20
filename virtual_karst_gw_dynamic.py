@@ -11,6 +11,7 @@ is that karst will change conductivity with age, which we are not capturing yet.
 
 #%%
 
+from tqdm import tqdm
 import os
 import numpy as np
 import pandas as pd
@@ -42,14 +43,14 @@ U = 1e-4 # uplift m/yr
 K = 1e-5 # streampower incision (yr^...)
 D = 1e-3 # diffusivity (m2/yr)
 
-D0 = 1e-5 # initial eq diameter (m)
-Df = 1e-3 # final eq diameter (m)
+D0 = 2e-5 # initial eq diameter (m)
+Df = 1e-4 # final eq diameter (m)
 n0 = 0.002 # initial porosity (-)
 nf = 0.01 # final porosity (-)
-t0 = 2e4 # median of logistic (yr)
-k = 1/2e3 # sharpness of logistic (1/yr)
+t0 = 5e5 # midpoint of logistic (yr)
+k = 1/5e4 # sharpness of logistic (1/yr)
 
-b_limestone = 20 # limestone unit thickness (m)
+b_limestone = 30 # limestone unit thickness (m)
 b_basement = 1000 # basement thickness (m)
 bed_dip = 0.000 #0.002 # dip of bed (positive = toward bottom boundary)
 ksat_limestone = calc_ksat(n0, D0) # ksat limestone (m/s)
@@ -59,12 +60,15 @@ n_weathered_basement = 0.1 # drainable porosity
 b_weathered_basement = 0.5 # thickness of regolith that can host aquifer in basement (m)
 
 r_tot = 1 / (3600 * 24 * 365) # total runoff m/s
-xbar = 1e-3 / 3600 # mean storm intensity of 1 mm/hr 
+xbar = 1e-3 / 3600 # mean storm intensity (m/s) equiv. 1 mm/hr 
+
+wt_delta_tol = 1e-7 # acceptable rate of water table change before moving on (m/hr)
 
 N = 5000 # number of geomorphic timesteps
 dt = 500 # geomorphic timestep (yr)
 dt_gw = 10 * 24 * 3600 # groundwater timestep (s)
 save_freq = 100 # steps between saving output
+Ns = N//save_freq
 output_fields = [
         "at_node:topographic__elevation",
         "at_node:aquifer_base__elevation",
@@ -82,8 +86,14 @@ save_vals = ['limestone_exposed',
                'area_lower', 
                'area_upper',
                'first_wtdelta', 
-               'wt_iterations'
+               'wt_iterations',
+               'ksat_limestone',
+               'n_limestone',
+               'mean_ie',
+               'mean_ie',
+               'mean_r',
                ]
+df_out = pd.DataFrame(np.zeros((N,len(save_vals))), columns=save_vals)
 
 #%% set up grid and lithology
 
@@ -92,12 +102,12 @@ mg.set_closed_boundaries_at_grid_edges(right_is_closed=True,
                                        left_is_closed=True,
                                        top_is_closed=False,
                                        bottom_is_closed=False)
-
-bottom_nodes = mg.nodes_at_bottom_edge
-top_nodes = mg.nodes_at_top_edge
+bnds_lower = mg.nodes_at_bottom_edge
+bnds_upper = mg.nodes_at_top_edge
 z = mg.add_zeros("node", "topographic__elevation")
 np.random.seed(10010)
 z += 0.1*np.random.rand(len(z))
+atot = np.sum(mg.cell_area_at_node[mg.core_nodes])
 
 # two layers, both with bottoms below ground. Top layer is limestone, bottom is basement.
 # weathered_thickness is a way to add some somewhat realistic weathered zone in the
@@ -105,13 +115,16 @@ z += 0.1*np.random.rand(len(z))
 layer_elevations = [b_limestone,b_basement]
 layer_ids = [0,1]
 attrs = {"Ksat_node": {0: ksat_limestone, 1: ksat_basement}, 
-         "weathered_thickness": {0: 0.0, 1: b_weathered_basement},
+         "weathered_thickness": {0: b_weathered_basement, 1: b_weathered_basement}, # was 0.0 for limestone but this can lead to discontinuities.
          "porosity": {0: n_limestone, 1: n_weathered_basement}
          }
 
 lith = LithoLayers(
     mg, layer_elevations, layer_ids, function=lambda x, y: - bed_dip * y, attrs=attrs
 )
+dz_ad = np.zeros(mg.size("node"))
+dz_ad[mg.core_nodes] = U * dt
+# dz_ad[top_nodes] += 0.5 * U * dt # effectively decrease the baselevel fall rate of the upper boundary
 
 # we just start with aquifer base at the base of the limestone, because limestone
 # covers the whole surface
@@ -126,14 +139,17 @@ ks = mg.add_zeros("link", "Ksat")
 ks[:] = map_value_at_max_node_to_link(mg, "water_table__elevation", "Ksat_node")
 
 # infiltration excess and recharge fields
+# model rainfall rates as exponentially distributed with mean xbar
+# then the fraction of rainfall rates that falls at higher intensity
+# than the hydraulic conductivity (if isotropic, steady state infiltration, etc.)
+# becomes infiltration excess.
 ie_frac = np.exp(-mg.at_node["Ksat_node"]/xbar) 
 ie_rate = r_tot * ie_frac # infiltration excess average rate (m/s)
 r_rate = r_tot * (1 - ie_frac) # recharge rate (m/s)
 q_ie = mg.add_zeros("node", "infiltration_excess")
-q_ie[mg.core_nodes] = ie_rate
+q_ie[mg.core_nodes] = ie_rate[mg.core_nodes]
 r = mg.add_zeros("node", "recharge_rate")
-r[mg.core_nodes] = r_rate
-
+r[mg.core_nodes] = r_rate[mg.core_nodes]
 
 # add a local runoff field - both infiltration excess and saturation excess
 q_local = mg.add_zeros("node", "local_runoff")
@@ -144,8 +160,12 @@ gdp = GroundwaterDupuitPercolator(
     mg, 
     hydraulic_conductivity='Ksat',
     porosity="porosity",
-    recharge_rate="recharge_rate"
+    recharge_rate="recharge_rate",
+    courant_coefficient=0.9,
+    vn_coefficient=0.9,
 )
+h = mg.at_node['aquifer__thickness']
+
 fd = FlowDirectorD8(mg)
 fa = FlowAccumulator(
     mg,
@@ -173,43 +193,24 @@ lmb.run_one_step()
 
 #%% run forward
 
-dz_ad = np.zeros(mg.size("node"))
-dz_ad[mg.core_nodes] = U * dt
-# dz_ad[top_nodes] += 0.5 * U * dt # effectively decrease the baselevel fall rate of the upper boundary
-
-h = mg.at_node['aquifer__thickness']
-Ns = N//save_freq
-
-df_out = pd.DataFrame(np.zeros((N,len(save_vals))), columns=save_vals)
-bnds = mg.fixed_value_boundary_nodes
-bnds_lower = bnds[0:mg.shape[1]]
-bnds_upper = bnds[mg.shape[1]:]
-
-for i in range(N):
-
-    # update limestone rock properties
-    D = calc_pore_diam_logistic(i*dt, t0, k, D0, Df)
-    n = calc_porosity_logistic(i*dt, t0, k, D0, Df, n0, nf)
-    ksat = calc_ksat(n,D)
-    lith.update_rock_properties("porosity", 0, n)
-    lith.update_rock_properties("Ksat_node", 0, ksat)
-
-    # map new ksat to link
-    ks[:] = map_value_at_max_node_to_link(mg, "water_table__elevation", "Ksat_node")
-
-    # update infiltration excess and recharge
-    ie_frac = np.exp(-mg.at_node["Ksat_node"]/xbar) 
-    q_ie[mg.core_nodes] = r_tot * ie_frac
-    r[mg.core_nodes] = r_tot * (1 - ie_frac)
+for i in tqdm(range(N)):
 
     # iterate for steady state water table
     wt_delta = 1
     wt_iter = 0
-    while wt_delta > 1e-4:
+    while wt_delta > wt_delta_tol:
+
+        # if wt_iter == 0:
+        #     print('first round:', np.sum(zwt>z))
+        # else:
+        #     print(np.sum(zwt>z))
+
+        # h[zwt>z] = (z-zb)[zwt>z]
+        # zwt[zwt>z] = z[zwt>z]
 
         zwt0 = zwt.copy()
         gdp.run_with_adaptive_time_step_solver(dt_gw)
-        wt_delta = np.max(np.abs(zwt0 - zwt))/(dt_gw/3600)
+        wt_delta = np.max(np.abs(zwt0 - zwt))/dt_gw
 
         if wt_iter == 0:
             df_out['first_wtdelta'].loc[i] = wt_delta
@@ -234,7 +235,23 @@ for i in range(N):
     lith.run_one_step()
 
     # remove depressions
-    lmb.run_one_step()
+    # if np.sum(mg.at_node['drainage_area'][mg.open_boundary_nodes]) < 0.9 * atot:
+    #     lmb.run_one_step()
+
+    # update limestone rock properties
+    D = calc_pore_diam_logistic(i*dt, t0, k, D0, Df)
+    n = calc_porosity_logistic(i*dt, t0, k, D0, Df, n0, nf)
+    ksat = calc_ksat(n,D)
+    lith.update_rock_properties("porosity", 0, n)
+    lith.update_rock_properties("Ksat_node", 0, ksat)
+
+    # map new ksat to link
+    ks[:] = map_value_at_max_node_to_link(mg, "water_table__elevation", "Ksat_node")
+
+    # update infiltration excess and recharge
+    ie_frac = np.exp(-mg.at_node["Ksat_node"]/xbar) 
+    q_ie[mg.core_nodes] = r_tot * ie_frac[mg.core_nodes]
+    r[mg.core_nodes] = r_tot * (1 - ie_frac[mg.core_nodes])
 
     # update lower aquifer boundary condition
     zb[mg.core_nodes] = ((z - lith.z_bottom[rock_id,:]) - mg.at_node["weathered_thickness"])[mg.core_nodes]
@@ -242,8 +259,8 @@ for i in range(N):
 
     # something to handle the aquifer itself - see regolith models in DupuitLEM
     # this should cover it, but again check boundary conditions
-    h[mg.core_nodes] = (zwt - zb)[mg.core_nodes]
-
+    h[h>z-zb] = (z-zb)[h>z-zb]
+    zwt[:] = zb+h
 
     ###################### save output #################
 
@@ -258,14 +275,14 @@ for i in range(N):
     Qt, Qb = get_lower_upper_water_flux(mg, bnds_lower, bnds_upper)
     df_out['discharge_lower'].loc[i] = Qb
     df_out['discharge_upper'].loc[i] = Qt
-    df_out['ksat_limestone'] = ksat
-    df_out['n_limestone'] = n
-    df_out['mean_ie'] = np.mean(q_ie[mg.core_nodes])
-    df_out['mean_r'] = np.mean(r[mg.core_nodes])
+    df_out['ksat_limestone'].loc[i] = ksat
+    df_out['n_limestone'].loc[i] = n
+    df_out['mean_ie'].loc[i] = np.mean(q_ie[mg.core_nodes])
+    df_out['mean_r'].loc[i] = np.mean(r[mg.core_nodes])
 
     # save grid
     if i%save_freq==0:
-        print(f"Finished iteration {i}")
+        # print(f"Finished iteration {i}")
 
         # save the specified grid fields
         filename = os.path.join(save_directory, id, f"{id}_grid_{i}.nc")
