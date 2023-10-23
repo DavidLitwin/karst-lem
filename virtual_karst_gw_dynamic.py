@@ -30,7 +30,7 @@ from landlab.components import (
     GroundwaterDupuitPercolator,
 )
 from landlab.grid.mappers import map_value_at_max_node_to_link
-from landlab.io.netcdf import to_netcdf
+from landlab.io.netcdf import write_raster_netcdf
 from virtual_karst_funcs import *
 
 fig_directory = '/Users/dlitwin/Documents/Research/Karst landscape evolution/landlab_virtual_karst/figures'
@@ -48,7 +48,7 @@ Df = 1e-4 # final eq diameter (m)
 n0 = 0.002 # initial porosity (-)
 nf = 0.01 # final porosity (-)
 t0 = 5e5 # midpoint of logistic (yr)
-k = 1/5e4 # sharpness of logistic (1/yr)
+kt = 1/5e4 # sharpness of logistic (1/yr)
 
 b_limestone = 30 # limestone unit thickness (m)
 b_basement = 1000 # basement thickness (m)
@@ -60,7 +60,7 @@ n_weathered_basement = 0.1 # drainable porosity
 b_weathered_basement = 0.5 # thickness of regolith that can host aquifer in basement (m)
 
 r_tot = 1 / (3600 * 24 * 365) # total runoff m/s
-xbar = 1e-3 / 3600 # mean storm intensity (m/s) equiv. 1 mm/hr 
+ibar = 1e-3 / 3600 # mean storm intensity (m/s) equiv. 1 mm/hr 
 
 wt_delta_tol = 1e-7 # acceptable rate of water table change before moving on (m/hr)
 
@@ -70,30 +70,33 @@ dt_gw = 10 * 24 * 3600 # groundwater timestep (s)
 save_freq = 100 # steps between saving output
 Ns = N//save_freq
 output_fields = [
-        "at_node:topographic__elevation",
-        "at_node:aquifer_base__elevation",
-        "at_node:water_table__elevation",
-        "at_node:surface_water_discharge",
-        "at_node:local_runoff",
-        "at_node:rock_type__id"
+        "topographic__elevation",
+        "aquifer_base__elevation",
+        "water_table__elevation",
+        "surface_water_discharge",
+        "local_runoff",
+        "rock_type__id"
         ]
-save_vals = ['limestone_exposed', 
+save_vals = ['limestone_exposed',
                'mean_relief',
-               'max_relief', 
-               'median_aquifer_thickness', 
-               'discharge_lower', 
+               'max_relief',
+               'median_aquifer_thickness',
+               'discharge_lower',
                'discharge_upper',
-               'area_lower', 
+               'area_lower',
                'area_upper',
-               'first_wtdelta', 
+               'first_wtdelta',
                'wt_iterations',
                'ksat_limestone',
                'n_limestone',
                'mean_ie',
-               'mean_ie',
                'mean_r',
                ]
 df_out = pd.DataFrame(np.zeros((N,len(save_vals))), columns=save_vals)
+df_params = pd.DataFrame({'U':U, 'K':K, 'D':D, 'D0':D0, 'Df':Df, 'n0':n0, 'nf':nf, 't0':t0, 'kt':kt, 'b_limestone':b_limestone, 'b_basement':b_basement, 'bed_dip':bed_dip,
+                          'ksat_limestone':ksat_limestone, 'ksat_basement':ksat_basement, 'n_limestone':n_limestone,'n_weathered_basement':n_weathered_basement,
+                           'b_weathered_basement':b_weathered_basement, 'r_tot':r_tot, 'ibar':ibar, 'wt_delta_tol':wt_delta_tol, 'N':N, 'dt':dt, 'dt_gw':dt_gw, 'save_freq':save_freq }, index=[0])
+df_params.to_csv(os.path.join(save_directory, id, f"params_{id}.csv"))
 
 #%% set up grid and lithology
 
@@ -139,11 +142,11 @@ ks = mg.add_zeros("link", "Ksat")
 ks[:] = map_value_at_max_node_to_link(mg, "water_table__elevation", "Ksat_node")
 
 # infiltration excess and recharge fields
-# model rainfall rates as exponentially distributed with mean xbar
+# model rainfall rates as exponentially distributed with mean ibar
 # then the fraction of rainfall rates that falls at higher intensity
 # than the hydraulic conductivity (if isotropic, steady state infiltration, etc.)
 # becomes infiltration excess.
-ie_frac = np.exp(-mg.at_node["Ksat_node"]/xbar) 
+ie_frac = np.exp(-mg.at_node["Ksat_node"]/ibar) 
 ie_rate = r_tot * ie_frac # infiltration excess average rate (m/s)
 r_rate = r_tot * (1 - ie_frac) # recharge rate (m/s)
 q_ie = mg.add_zeros("node", "infiltration_excess")
@@ -239,8 +242,8 @@ for i in tqdm(range(N)):
     #     lmb.run_one_step()
 
     # update limestone rock properties
-    D = calc_pore_diam_logistic(i*dt, t0, k, D0, Df)
-    n = calc_porosity_logistic(i*dt, t0, k, D0, Df, n0, nf)
+    D = calc_pore_diam_logistic(i*dt, t0, kt, D0, Df)
+    n = calc_porosity_logistic(i*dt, t0, kt, D0, Df, n0, nf)
     ksat = calc_ksat(n,D)
     lith.update_rock_properties("porosity", 0, n)
     lith.update_rock_properties("Ksat_node", 0, ksat)
@@ -249,7 +252,7 @@ for i in tqdm(range(N)):
     ks[:] = map_value_at_max_node_to_link(mg, "water_table__elevation", "Ksat_node")
 
     # update infiltration excess and recharge
-    ie_frac = np.exp(-mg.at_node["Ksat_node"]/xbar) 
+    ie_frac = np.exp(-mg.at_node["Ksat_node"]/ibar) 
     q_ie[mg.core_nodes] = r_tot * ie_frac[mg.core_nodes]
     r[mg.core_nodes] = r_tot * (1 - ie_frac[mg.core_nodes])
 
@@ -285,14 +288,14 @@ for i in tqdm(range(N)):
         # print(f"Finished iteration {i}")
 
         # save the specified grid fields
-        filename = os.path.join(save_directory, id, f"{id}_grid_{i}.nc")
-        to_netcdf(mg, filename, include=output_fields, format="NETCDF4")
+        filename = os.path.join(save_directory, id, f"grid_{id}_{i}.nc")
+        write_raster_netcdf(filename, mg, names=output_fields, time=i*dt, format="NETCDF4")
 
 #%% save out
 
 df_out['time'] = np.arange(0,N*dt,dt)
 df_out.set_index('time', inplace=True)
-df_out.to_csv(os.path.join(save_directory, id, f"{id}_output.csv"))
+df_out.to_csv(os.path.join(save_directory, id, f"output_{id}.csv"))
 
 # %% plot topogrpahic change
 
