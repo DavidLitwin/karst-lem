@@ -130,7 +130,7 @@ def calc_pore_diam_logistic(t, t0, k, D0, Df):
     Df: final diameter (L)
 
     """
-    return Df / (1 + np.exp(-k*(t-t0))) + D0
+    return (Df-D0) / (1 + np.exp(-k * (t - t0))) + D0
 
 def calc_porosity_logistic(t, t0, k, D0, Df, n0, nf):
     """
@@ -148,5 +148,5 @@ def calc_porosity_logistic(t, t0, k, D0, Df, n0, nf):
     nf: final porosity (-)
     """
 
-    return (nf - n0)/(Df - D0) * (Df / (1 + np.exp(-k*(t-t0)))) + n0
+    return (nf - n0)/(Df - D0) * ((Df - D0) / (1 + np.exp(-k * (t - t0)))) + n0
 
