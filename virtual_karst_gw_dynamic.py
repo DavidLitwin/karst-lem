@@ -35,7 +35,7 @@ from virtual_karst_funcs import *
 
 fig_directory = '/Users/dlitwin/Documents/Research/Karst landscape evolution/landlab_virtual_karst/figures'
 save_directory = '/Users/dlitwin/Documents/Research Data/Local/karst_lem'
-id = "flat_dynamic_ksat_1"
+id = "flat_dynamic_ksat_3"
 
 #%% parameters
 
@@ -47,7 +47,7 @@ D0 = 2e-5 # initial eq diameter (m)
 Df = 1e-4 # final eq diameter (m)
 n0 = 0.002 # initial porosity (-)
 nf = 0.01 # final porosity (-)
-t0 = 5e5 # midpoint of logistic (yr)
+t0 = 1.25e6 # midpoint of logistic (yr)
 kt = 1/5e4 # sharpness of logistic (1/yr)
 
 b_limestone = 30 # limestone unit thickness (m)
@@ -62,18 +62,18 @@ b_weathered_basement = 0.5 # thickness of regolith that can host aquifer in base
 r_tot = 1 / (3600 * 24 * 365) # total runoff m/s
 ibar = 1e-3 / 3600 # mean storm intensity (m/s) equiv. 1 mm/hr 
 
-wt_delta_tol = 1e-7 # acceptable rate of water table change before moving on (m/hr)
+wt_delta_tol = 2e-7 # acceptable rate of water table change before moving on (m/s)
 
 N = 5000 # number of geomorphic timesteps
 dt = 500 # geomorphic timestep (yr)
-dt_gw = 10 * 24 * 3600 # groundwater timestep (s)
+dt_gw = 1 * 24 * 3600 # groundwater timestep (s)
 save_freq = 100 # steps between saving output
 Ns = N//save_freq
 output_fields = [
         "topographic__elevation",
         "aquifer_base__elevation",
         "water_table__elevation",
-        "surface_water_discharge",
+        "surface_water__discharge",
         "local_runoff",
         "rock_type__id"
         ]
@@ -289,7 +289,7 @@ for i in tqdm(range(N)):
 
         # save the specified grid fields
         filename = os.path.join(save_directory, id, f"grid_{id}_{i}.nc")
-        write_raster_netcdf(filename, mg, names=output_fields, time=i*dt, format="NETCDF4")
+        write_raster_netcdf(filename, mg, names=output_fields, time=i*dt)
 
 #%% save out
 

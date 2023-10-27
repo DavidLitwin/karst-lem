@@ -14,7 +14,7 @@ from virtual_karst_funcs import *
 
 fig_directory = '/Users/dlitwin/Documents/Research/Karst landscape evolution/landlab_virtual_karst/figures'
 save_directory = '/Users/dlitwin/Documents/Research Data/Local/karst_lem'
-id = "flat_dynamic_ksat_2"
+id = "flat_dynamic_ksat_4"
 
 df_out = pd.read_csv(os.path.join(save_directory,id,f'output_{id}.csv'))
 df_params = pd.read_csv(os.path.join(save_directory,id,f'params_{id}.csv')).loc[0]
@@ -52,14 +52,14 @@ ksat = calc_ksat(n,D)
 
 fig, ax = plt.subplots()
 ax.plot(t, n, color='seagreen')
-ax.set_ylim((0.0,0.02))
+ax.set_ylim((0.0,0.012))
 ax.set_ylabel('Porosity (-)', color='seagreen')
 ax.set_xlabel('Time (yr)')
 
 ax1 = ax.twinx()
 ax1.plot(t, ksat, color='dodgerblue')
 ax1.set_ylabel(r'$k_{sat}$ (m/s)', color='dodgerblue')
-ax1.set_ylim((0.0,5.1e-5))
+ax1.set_ylim((0.0,4e-5))
 plt.savefig(os.path.join(save_directory, id, "limestone_props.png"))
 
 
@@ -68,14 +68,14 @@ plt.savefig(os.path.join(save_directory, id, "limestone_props.png"))
 
 fig, ax = plt.subplots()
 ax.plot(t, df_out['limestone_exposed'], color='darkgoldenrod')
-ax.set_ylim((0.01,1.01))
+ax.set_ylim((0.0,1.01))
 ax.set_ylabel('Limestone exposed (-)', color='darkgoldenrod')
 ax.set_xlabel('Time (yr)')
 
 ax1 = ax.twinx()
 ax1.plot(t, ksat, color='dodgerblue')
 ax1.set_ylabel(r'$k_{sat}$ (m/s)', color='dodgerblue')
-ax1.set_ylim((0.0,5.1e-5))
+ax1.set_ylim((0.0,3e-5))
 plt.savefig(os.path.join(save_directory, id, "limestone_ksat.png"))
 
 
@@ -90,7 +90,7 @@ ax.set_xlabel('Time (yr)')
 ax1 = ax.twinx()
 ax1.plot(t, ksat, color='dodgerblue')
 ax1.set_ylabel(r'$k_{sat}$ (m/s)', color='dodgerblue')
-ax1.set_ylim((0.0,5.1e-5))
+ax1.set_ylim((0.0,3e-5))
 plt.savefig(os.path.join(save_directory, id, "med_aquifer_thickness.png"))
 
 
@@ -105,6 +105,6 @@ ax.set_xlabel('Time (yr)')
 ax1 = ax.twinx()
 ax1.plot(t, ksat, color='dodgerblue')
 ax1.set_ylabel(r'$k_{sat}$ (m/s)', color='dodgerblue')
-ax1.set_ylim((0.0,5.1e-5))
+ax1.set_ylim((0.0,3e-5))
 plt.savefig(os.path.join(save_directory, id, "recharge.png"))
 # %%
