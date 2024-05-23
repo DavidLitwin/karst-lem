@@ -1,12 +1,10 @@
 """
 More complex test of virtual karst in landlab. Use the Lithology component to 
-track two layers: a limestone layer, and a basement. Now use the thicknesses and
-permeabilities of those lithologies to parametrize a GroundwaterDupuitPercolator
-model.
+track three layers: a limestone layer, weathered basement, and unweathered basement. 
+Thicknesses and permeabilities of those lithologies to parametrize a GroundwaterDupuitPercolator
+model. Limestone porosity and permeability change with age, which changes partitioning between recharge
+and infiltration excess, and flow in the subsurface.
 
-Experiment with some partial partitioning - may need to allow some amount of 
-surface runoff in order to get incision to begin with. Part of the challenge here
-is that karst will change conductivity with age, which we are not capturing yet.
 """
 
 #%%
@@ -35,22 +33,26 @@ from virtual_karst_funcs import *
 
 fig_directory = '/Users/dlitwin/Documents/Research/Karst landscape evolution/landlab_virtual_karst/figures'
 save_directory = '/Users/dlitwin/Documents/Research Data/Local/karst_lem'
-id = "flat_dynamic_ksat_3"
+id = "flat_dynamic_ksat_5"
 
 #%% parameters
 
-U = 1e-4 # uplift m/yr
-K = 1e-5 # streampower incision (yr^...)
-D = 1e-3 # diffusivity (m2/yr)
+U = 1e-4 # uplift (m/yr)
+E_limestone = 0.0 # limestone surface chemical denudation rate (m/yr)
+E_weathered_basement = 0.0 # weathered basement surface chemical denudation rate (m/yr)
+K_sp = 1e-5 # streampower incision (yr^...)
+m_sp = 0.5 # exponent on discharge
+n_sp = 1.0 # exponent on slope
+D_ld = 1e-3 # diffusivity (m2/yr)
 
-D0 = 2e-5 # initial eq diameter (m)
+D0 = 1e-5 # initial eq diameter (m)
 Df = 1e-4 # final eq diameter (m)
 n0 = 0.002 # initial porosity (-)
 nf = 0.01 # final porosity (-)
-t0 = 1.25e6 # midpoint of logistic (yr)
-kt = 1/5e4 # sharpness of logistic (1/yr)
+t0 = 1e5 #1.25e6 # midpoint of logistic (yr)
+kt = 1/1e4 # sharpness of logistic (1/yr)
 
-b_limestone = 30 # limestone unit thickness (m)
+b_limestone = 50 # limestone unit thickness (m)
 b_basement = 1000 # basement thickness (m)
 bed_dip = 0.000 #0.002 # dip of bed (positive = toward bottom boundary)
 ksat_limestone = calc_ksat(n0, D0) # ksat limestone (m/s)
@@ -62,10 +64,12 @@ b_weathered_basement = 0.5 # thickness of regolith that can host aquifer in base
 r_tot = 1 / (3600 * 24 * 365) # total runoff m/s
 ibar = 1e-3 / 3600 # mean storm intensity (m/s) equiv. 1 mm/hr 
 
-wt_delta_tol = 2e-7 # acceptable rate of water table change before moving on (m/s)
+wt_delta_tol = 1e-6 # acceptable rate of water table change before moving on (m/s)
 
-N = 5000 # number of geomorphic timesteps
+T = 5e6 # total geomorphic time
 dt = 500 # geomorphic timestep (yr)
+N = int(T//dt) # number of geomorphic timesteps
+
 dt_gw = 1 * 24 * 3600 # groundwater timestep (s)
 save_freq = 100 # steps between saving output
 Ns = N//save_freq
@@ -75,7 +79,8 @@ output_fields = [
         "water_table__elevation",
         "surface_water__discharge",
         "local_runoff",
-        "rock_type__id"
+        "rock_type__id",
+        "exfiltration_rate",
         ]
 save_vals = ['limestone_exposed',
                'mean_relief',
@@ -93,9 +98,15 @@ save_vals = ['limestone_exposed',
                'mean_r',
                ]
 df_out = pd.DataFrame(np.zeros((N,len(save_vals))), columns=save_vals)
-df_params = pd.DataFrame({'U':U, 'K':K, 'D':D, 'D0':D0, 'Df':Df, 'n0':n0, 'nf':nf, 't0':t0, 'kt':kt, 'b_limestone':b_limestone, 'b_basement':b_basement, 'bed_dip':bed_dip,
-                          'ksat_limestone':ksat_limestone, 'ksat_basement':ksat_basement, 'n_limestone':n_limestone,'n_weathered_basement':n_weathered_basement,
-                           'b_weathered_basement':b_weathered_basement, 'r_tot':r_tot, 'ibar':ibar, 'wt_delta_tol':wt_delta_tol, 'N':N, 'dt':dt, 'dt_gw':dt_gw, 'save_freq':save_freq }, index=[0])
+df_params = pd.DataFrame({'U':U, 'K':K_sp, 'D_ld':D_ld, 'm_sp':m_sp,
+                          'E_limestone': E_limestone, 'E_weathered_basement':E_weathered_basement,
+                          'n_sp':n_sp, 'D0':D0, 'Df':Df, 'n0':n0, 'nf':nf, 't0':t0, 'kt':kt, 
+                          'b_limestone':b_limestone, 'b_basement':b_basement, 'bed_dip':bed_dip,
+                          'ksat_limestone':ksat_limestone, 'ksat_basement':ksat_basement, 
+                          'n_limestone':n_limestone,'n_weathered_basement':n_weathered_basement,
+                          'b_weathered_basement':b_weathered_basement, 
+                          'r_tot':r_tot, 'ibar':ibar, 
+                          'wt_delta_tol':wt_delta_tol, 'T':T, 'N':N, 'dt':dt, 'dt_gw':dt_gw, 'save_freq':save_freq}, index=[0])
 df_params.to_csv(os.path.join(save_directory, id, f"params_{id}.csv"))
 
 #%% set up grid and lithology
@@ -119,7 +130,8 @@ layer_elevations = [b_limestone,b_basement]
 layer_ids = [0,1]
 attrs = {"Ksat_node": {0: ksat_limestone, 1: ksat_basement}, 
          "weathered_thickness": {0: b_weathered_basement, 1: b_weathered_basement}, # was 0.0 for limestone but this can lead to discontinuities.
-         "porosity": {0: n_limestone, 1: n_weathered_basement}
+         "porosity": {0: n_limestone, 1: n_weathered_basement},
+         "chemical_denudation_rate": {0: E_limestone, 1: E_weathered_basement}
          }
 
 lith = LithoLayers(
@@ -157,6 +169,9 @@ r[mg.core_nodes] = r_rate[mg.core_nodes]
 # add a local runoff field - both infiltration excess and saturation excess
 q_local = mg.add_zeros("node", "local_runoff")
 
+# add a field for exfiltration -- derived from local gdp runoff
+qe_local = mg.add_zeros("node", "exfiltration_rate")
+
 #%% initialize components
 
 gdp = GroundwaterDupuitPercolator(
@@ -188,8 +203,8 @@ lmb = LakeMapperBarnes(
     ignore_overfill=True,
 )
 
-fs = FastscapeEroder(mg, K_sp=K, discharge_field='surface_water__discharge')
-ld = LinearDiffuser(mg, linear_diffusivity=D)
+fs = FastscapeEroder(mg, K_sp=K_sp, discharge_field='surface_water__discharge', m_sp=m_sp, n_sp=n_sp)
+ld = LinearDiffuser(mg, linear_diffusivity=D_ld)
 
 lmb.run_one_step()
 
@@ -223,6 +238,8 @@ for i in tqdm(range(N)):
     # local runoff is sum of saturation and infiltration excess. Convert units to m/yr. 
     q_local[mg.core_nodes] = (mg.at_node['average_surface_water__specific_discharge'][mg.core_nodes] + 
                               mg.at_node['infiltration_excess'][mg.core_nodes]) * 3600 * 24 * 365
+    qe_local[mg.core_nodes] = np.maximum(0, mg.at_node['average_surface_water__specific_discharge'][mg.core_nodes]-r[mg.core_nodes])
+
 
     # update areas
     fa.run_one_step()
@@ -230,6 +247,7 @@ for i in tqdm(range(N)):
     # update topography
     fs.run_one_step(dt)
     ld.run_one_step(dt)
+    z[mg.core_nodes] -= mg.at_node["chemical_denudation_rate"][mg.core_nodes]
     z += dz_ad
 
     # update lithologic model
@@ -289,7 +307,11 @@ for i in tqdm(range(N)):
 
         # save the specified grid fields
         filename = os.path.join(save_directory, id, f"grid_{id}_{i}.nc")
-        write_raster_netcdf(filename, mg, names=output_fields, time=i*dt)
+        write_raster_netcdf(filename, mg, names=output_fields, time=i*dt, append=True)
+
+# save output, adding the dataframe to the netcdf as attributes
+df_out['time'] = np.arange(0,N*dt,dt)
+write_raster_netcdf(filename, mg, names=output_fields, time=i*dt, append=True, attrs=df_out.to_dict())
 
 #%% save out
 
