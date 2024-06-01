@@ -15,7 +15,6 @@ import numpy as np
 import pandas as pd
 
 import matplotlib.pyplot as plt
-from matplotlib.colors import LightSource
 
 from landlab import RasterModelGrid
 from landlab.components import (
@@ -31,21 +30,22 @@ from landlab.grid.mappers import map_value_at_max_node_to_link
 from landlab.io.netcdf import write_raster_netcdf
 from virtual_karst_funcs import *
 
-fig_directory = '/Users/dlitwin/Documents/Research/Karst landscape evolution/landlab_virtual_karst/figures'
 save_directory = '/Users/dlitwin/Documents/Research Data/Local/karst_lem'
-id = "flat_dynamic_ksat_5"
+print('Enter base filename:')
+id = input()
+# id = "flat_dynamic_ksat_9"
 
 #%% parameters
 
 U = 1e-4 # uplift (m/yr)
-E_limestone = 0.0 # limestone surface chemical denudation rate (m/yr)
+E_limestone = 5e-5 # limestone surface chemical denudation rate (m/yr)
 E_weathered_basement = 0.0 # weathered basement surface chemical denudation rate (m/yr)
 K_sp = 1e-5 # streampower incision (yr^...)
 m_sp = 0.5 # exponent on discharge
 n_sp = 1.0 # exponent on slope
 D_ld = 1e-3 # diffusivity (m2/yr)
 
-D0 = 1e-5 # initial eq diameter (m)
+D0 = 2e-5 # initial eq diameter (m)
 Df = 1e-4 # final eq diameter (m)
 n0 = 0.002 # initial porosity (-)
 nf = 0.01 # final porosity (-)
@@ -247,7 +247,7 @@ for i in tqdm(range(N)):
     # update topography
     fs.run_one_step(dt)
     ld.run_one_step(dt)
-    z[mg.core_nodes] -= mg.at_node["chemical_denudation_rate"][mg.core_nodes]
+    z[mg.core_nodes] -= mg.at_node["chemical_denudation_rate"][mg.core_nodes] * dt
     z += dz_ad
 
     # update lithologic model
@@ -306,12 +306,10 @@ for i in tqdm(range(N)):
         # print(f"Finished iteration {i}")
 
         # save the specified grid fields
-        filename = os.path.join(save_directory, id, f"grid_{id}_{i}.nc")
-        write_raster_netcdf(filename, mg, names=output_fields, time=i*dt, append=True)
-
-# save output, adding the dataframe to the netcdf as attributes
-df_out['time'] = np.arange(0,N*dt,dt)
-write_raster_netcdf(filename, mg, names=output_fields, time=i*dt, append=True, attrs=df_out.to_dict())
+        # filename = os.path.join(save_directory, id, f"grid_{id}_{i}.nc")
+        filename1 = os.path.join(save_directory, id, f"grid_{id}.nc")
+        # write_raster_netcdf(filename, mg, names=output_fields, time=i*dt)
+        write_raster_netcdf(filename1, mg, names=output_fields, time=i*dt, append=True)
 
 #%% save out
 
@@ -319,7 +317,7 @@ df_out['time'] = np.arange(0,N*dt,dt)
 df_out.set_index('time', inplace=True)
 df_out.to_csv(os.path.join(save_directory, id, f"output_{id}.csv"))
 
-# %% plot topogrpahic change
+# %% plot topographic change
 
 # topography
 plt.figure()
@@ -336,53 +334,6 @@ mg.imshow('surface_water__discharge', cmap="Blues", colorbar_label='Discharge')
 plt.savefig(os.path.join(save_directory, id, "lith_gdp_discharge.png"))
 
 
-
-#%%
-
-# field = mg.at_node["aquifer__thickness"] / (z-zb)
-# field = z-zb
-# field = mg.at_node["aquifer__thickness"]
-# field = mg.at_node["average_surface_water__specific_discharge"]
-# plt.figure()
-# mg.imshow(field, cmap="Blues", colorbar_label='thickness') #, vmin=0, vmax=1
-# mg.imshow('water_table__elevation', cmap="plasma", colorbar_label='WT Elevation')
-
-
-#%%
-# hillshade
-
-elev = mg.at_node['topographic__elevation'].copy()
-elev[mg.boundary_nodes] = np.nan
-y = np.arange(mg.shape[0] + 1) * mg.dx - mg.dx * 0.5
-x = np.arange(mg.shape[1] + 1) * mg.dy - mg.dy * 0.5
-
-elev_plot = elev.reshape(mg.shape)
-elev_profile = np.nanmean(elev_plot, axis=1)
-
-f, (ax0, ax1) = plt.subplots(1, 2, width_ratios=[4, 1], figsize=(10,5))
-ls = LightSource(azdeg=135, altdeg=45)
-ax0.imshow(
-        ls.hillshade(elev_plot, 
-            vert_exag=1, 
-            dx=mg.dx, 
-            dy=mg.dy), 
-        origin="lower", 
-        extent=(x[0], x[-1], y[0], y[-1]), 
-        cmap='gray',
-        )
-for i in range(mg.shape[1]):
-    ax1.plot(elev_plot[:,i], y[0:-1], alpha=0.1, color='k')
-ax1.plot(elev_profile, y[0:-1], linewidth=2, color='r')
-
-ax0.set_xlabel('X [m]')
-ax0.set_ylabel('Y [m]')
-ax1.set_xlabel('Z [m]')
-f.tight_layout()
-plt.savefig(os.path.join(save_directory, id, "hillshade.png"))
-# %%
-
-
-# df_out.plot()
 # %%
 
 fig, ax = plt.subplots()
@@ -415,14 +366,3 @@ plt.ylim((0.01,1.1))
 plt.ylabel('Limestone exposed (-)')
 plt.xlabel('Time (yr)')
 plt.savefig(os.path.join(save_directory, id, "exposed_limestone.png"))
-
-# %%
-
-# mask = get_divide_mask(mg, bnds_lower)
-# rid = (mg.at_node['rock_type__id'] == 0)*1
-# plt.figure()
-# mg.imshow(z)
-# mg.imshow(rid, alpha=0.5, cmap='Blues')
-
-
-# %%

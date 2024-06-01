@@ -8,31 +8,34 @@ import glob
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.colors import LightSource
+from netCDF4 import Dataset
+
 
 from landlab.io.netcdf import write_raster_netcdf, from_netcdf, read_netcdf
 from virtual_karst_funcs import *
 
 fig_directory = '/Users/dlitwin/Documents/Research/Karst landscape evolution/landlab_virtual_karst/figures'
 save_directory = '/Users/dlitwin/Documents/Research Data/Local/karst_lem'
-id = "flat_dynamic_ksat_2"
+id = "flat_dynamic_ksat_11"
 
 df_out = pd.read_csv(os.path.join(save_directory,id,f'output_{id}.csv'))
 df_params = pd.read_csv(os.path.join(save_directory,id,f'params_{id}.csv')).loc[0]
 
-#%% write raster netcdfs for paraview (for earlier cases using to_netcdf)
-
-grid_files = glob.glob(os.path.join(save_directory,id,'*.nc'))
-files = sorted(grid_files, key=lambda x:int(x.split('_')[-1][:-3]))
-iterations = [int(x.split('_')[-1][:-3]) for x in files]
-iteration = int(files[-1].split('_')[-1][:-3])
-
 #%%
-# for i in range(len(files)):
-#     grid = from_netcdf(files[i])
-#     write_raster_netcdf(os.path.join(save_directory,id,'paraview',f'{id}_grid_{i}.nc'),
-#                         grid,
-#                         time=df_out['time'].loc[i])
-    
+
+file = os.path.join(save_directory,id,f'grid_{id}.nc')
+fp = Dataset(file, "r", format="NETCDF4")
+elev = fp.variables['topographic__elevation'][-1,:,:].data
+rid = fp.variables['rock_type__id'][-1,:,:].data
+
+plt.figure()
+im = plt.imshow(elev, cmap='gist_earth')
+plt.colorbar(im, label='Elevation')
+
+plt.figure()
+im = plt.imshow(rid, cmap='Blues')
+# plt.colorbar(im, label='Elevation')
 
 # %% import params and output
 
@@ -54,15 +57,15 @@ ksat = calc_ksat(n,D)
 
 fig, ax = plt.subplots()
 ax.plot(t, n, color='seagreen')
-ax.set_ylim((0.0,0.012))
+ax.set_ylim((0.0,1.02*nf))
 ax.set_ylabel('Porosity (-)', color='seagreen')
 ax.set_xlabel('Time (yr)')
 
 ax1 = ax.twinx()
 ax1.plot(t, ksat, color='dodgerblue')
 ax1.set_ylabel(r'$k_{sat}$ (m/s)', color='dodgerblue')
-ax1.set_ylim((0.0,4e-5))
-# plt.savefig(os.path.join(save_directory, id, "limestone_props.png"))
+ax1.set_ylim((0.0,1.02*np.max(ksat)))
+plt.savefig(os.path.join(save_directory, id, "limestone_props.png"))
 
 
 #%% ksat change and limestone exposure
@@ -77,23 +80,23 @@ ax.set_xlabel('Time (yr)')
 ax1 = ax.twinx()
 ax1.plot(t, ksat, color='dodgerblue')
 ax1.set_ylabel(r'$k_{sat}$ (m/s)', color='dodgerblue')
-ax1.set_ylim((0.0,3e-5))
-# plt.savefig(os.path.join(save_directory, id, "limestone_ksat.png"))
+ax1.set_ylim((0.0,1.02*np.max(ksat)))
+plt.savefig(os.path.join(save_directory, id, "limestone_ksat.png"))
 
 
 # %% ksat and mean aquifer thickness
 
 fig, ax = plt.subplots()
 ax.plot(t, df_out['median_aquifer_thickness'], color='b')
-# ax.set_ylim((0.01,1.01))
+ax.set_ylim((0.01,1.02*np.max(df_out['median_aquifer_thickness'])))
 ax.set_ylabel('Median Aquifer Thickness (m)', color='b')
 ax.set_xlabel('Time (yr)')
 
 ax1 = ax.twinx()
 ax1.plot(t, ksat, color='dodgerblue')
 ax1.set_ylabel(r'$k_{sat}$ (m/s)', color='dodgerblue')
-ax1.set_ylim((0.0,3e-5))
-# plt.savefig(os.path.join(save_directory, id, "med_aquifer_thickness.png"))
+ax1.set_ylim((0.0,1.02*np.max(ksat)))
+plt.savefig(os.path.join(save_directory, id, "med_aquifer_thickness.png"))
 
 
 # %%
@@ -107,33 +110,37 @@ ax.set_xlabel('Time (yr)')
 ax1 = ax.twinx()
 ax1.plot(t, ksat, color='dodgerblue')
 ax1.set_ylabel(r'$k_{sat}$ (m/s)', color='dodgerblue')
-ax1.set_ylim((0.0,3e-5))
-# plt.savefig(os.path.join(save_directory, id, "recharge.png"))
+ax1.set_ylim((0.0,1.02*np.max(ksat)))
+plt.savefig(os.path.join(save_directory, id, "recharge.png"))
 
 # %% Big figure (to animate?)
 
+time = fp.variables['t'][:].data
+elev_max = np.max(fp.variables['topographic__elevation'][:].data)
+x = fp.variables['x'][:].data + 0.5 * np.diff(fp.variables['x'][:].data)[0]
+y = fp.variables['y'][:].data + 0.5 * np.diff(fp.variables['y'][:].data)[0]
+X, Y = np.meshgrid(x,y)
 
-elev_max = 250
-# N = 4000
-
-for i, N in enumerate(iterations):
+for i, t1 in enumerate(time):
 
     fig = plt.figure(figsize=(8,5))
-    t1 = t[N]
-    file = files[np.where(np.equal(iterations,N))[0][0]]
-    mg = from_netcdf(file)
+
+    elev = fp.variables['topographic__elevation'][i,:,:].data
+    rockid = fp.variables['rock_type__id'][i,:,:].data
+    local_runoff = fp.variables['local_runoff'][i,:,:].data
+    runoff_ma = np.ma.masked_array(data=local_runoff, mask=local_runoff<0.5)
 
     ax1 = fig.add_subplot(2,2,2)
     ax1.plot(t, n, color='seagreen')
     ax1.axvline(x=t1, linestyle='--', color='r')
-    ax1.set_ylim((0.0,0.012))
+    ax1.set_ylim((0.0,1.02*nf))
     ax1.set_ylabel('Porosity (-)', color='seagreen')
     ax1.set_xlabel('Time (yr)')
 
     ax1t = ax1.twinx()
     ax1t.plot(t, ksat, color='dodgerblue')
     ax1t.set_ylabel(r'$k_{sat}$ (m/s)', color='dodgerblue')
-    ax1t.set_ylim((0.0,4e-5))
+    ax1t.set_ylim((0.0,1.02*np.max(ksat)))
 
     ax2 = fig.add_subplot(2,2,4)
     ax2.plot(t, df_out['limestone_exposed'], color='darkgoldenrod')
@@ -149,22 +156,16 @@ for i, N in enumerate(iterations):
     ax2t.set_xlabel('Time (yr)')
 
     ax3 = fig.add_subplot(2,2,1)
-    rockid = mg.at_node['rock_type__id'].copy()
-    local_runoff = mg.at_node['local_runoff'].copy()
-    elev = mg.at_node['topographic__elevation'].copy()
-    runoff_ma = np.ma.masked_array(data=local_runoff, mask=local_runoff<0.5)
-    y = np.arange(mg.shape[0] + 1) * mg.dx - mg.dx * 0.5
-    x = np.arange(mg.shape[1] + 1) * mg.dy - mg.dy * 0.5
 
     ax3.imshow(
-            rockid.reshape(mg.shape),
+            rockid,
             origin="lower", 
             extent=(x[0], x[-1], y[0], y[-1]), 
-            cmap='gray',
+            cmap='gray_r',
             alpha=0.3,
             )
     ax3.imshow(
-            runoff_ma.reshape(mg.shape),
+            runoff_ma,
             origin="lower", 
             extent=(x[0], x[-1], y[0], y[-1]), 
             cmap='plasma',
@@ -174,9 +175,9 @@ for i, N in enumerate(iterations):
             )
 
     ax4 = fig.add_subplot(2,2,3, projection='3d')
-    surf = ax4.plot_surface(mg.x_of_node.reshape(mg.shape), 
-                            mg.y_of_node.reshape(mg.shape),
-                            elev.reshape(mg.shape), 
+    surf = ax4.plot_surface(X, 
+                            Y,
+                            elev, 
                             rstride=1, 
                             cstride=1, 
                             cmap='gist_earth',
@@ -187,7 +188,7 @@ for i, N in enumerate(iterations):
     # ax4.set_aspect('equal')
     # ax4.set_xlim(0,7500)
     # ax4.set_ylim(0,5000)
-    ax4.set_box_aspect((np.ptp(mg.x_of_node), np.ptp(mg.y_of_node), 2*np.max(elev)))
+    ax4.set_box_aspect((np.ptp(x), np.ptp(y), 2*np.max(elev)))
     ax4.set_xlim(2500,5000)
     ax4.set_ylim(1500,3000)
 
@@ -195,44 +196,23 @@ for i, N in enumerate(iterations):
     plt.savefig(os.path.join(save_directory,id,'%s.%04d.png'%(id,i)), dpi=300)
     plt.close()
 
-# %%
+# %%  images for elevation animation: from appended NETCDF4
 
-fig = plt.figure()
-ax4 = fig.add_subplot(1,1,1, projection='3d')
-surf = ax4.plot_surface(mg.x_of_node.reshape(mg.shape), 
-                        mg.y_of_node.reshape(mg.shape),
-                        elev.reshape(mg.shape), 
-                        rstride=1, cstride=1, 
-                        cmap='gist_earth', 
-                        alpha=1.0, linewidth=0,
-                        antialiased=False)
-# ax4.set_aspect('equal')
-ax4.set_box_aspect((np.ptp(mg.x_of_node), np.ptp(mg.y_of_node), 2*elev_max))
-ax4.axis('off')
-ax4.set_xlim(0,7500)
-ax4.set_ylim(0,5000)
-# ax4.set_zlim(0, 1000)
-fig.tight_layout()
-# %%
+file = os.path.join(save_directory,id,f'grid_{id}.nc')
+fp = Dataset(file, "r", format="NETCDF4")
+elev = fp.variables['topographic__elevation'][:].data
+x = fp.variables['x'][:].data
+y = fp.variables['y'][:].data
+t = fp.variables['t'][:].data
+X, Y = np.meshgrid(x,y)
+elev_max = np.max(elev)
 
-# just elevation animation
-
-
-elev_max = 250
-# N = 4000
-
-for i, N in enumerate(iterations):
+for i, t in enumerate(t):
 
     fig = plt.figure(figsize=(8,5))
-    t1 = t[N]
-    file = files[np.where(np.equal(iterations,N))[0][0]]
-    mg = from_netcdf(file)
-    elev = mg.at_node['topographic__elevation'].copy()
 
     ax4 = fig.add_subplot(1,1,1, projection='3d')
-    surf = ax4.plot_surface(mg.x_of_node.reshape(mg.shape), 
-                            mg.y_of_node.reshape(mg.shape),
-                            elev.reshape(mg.shape), 
+    surf = ax4.plot_surface(X, Y, elev[i,:,:], 
                             rstride=1, 
                             cstride=1, 
                             cmap='gist_earth',
@@ -240,14 +220,59 @@ for i, N in enumerate(iterations):
                             linewidth=0,
                             antialiased=False)
     ax4.axis('off')
-    # ax4.set_aspect('equal')
     ax4.set_xlim(0,7500)
     ax4.set_ylim(0,5000)
-    ax4.set_box_aspect((np.ptp(mg.x_of_node), np.ptp(mg.y_of_node), 2*np.max(elev)))
+    ax4.set_box_aspect((np.ptp(x), np.ptp(y), 2*np.max(elev[i,:,:])))
     # ax4.set_xlim(2500,5000)
     # ax4.set_ylim(1500,3000)
 
     fig.tight_layout()
     plt.savefig(os.path.join(save_directory,id,'%s_elev.%04d.png'%(id,i)), dpi=300)
     plt.close()
+
+# %%
+
+# hillshade
+
+# elev = mg.at_node['topographic__elevation'].copy()
+# elev[mg.boundary_nodes] = np.nan
+# y = np.arange(mg.shape[0] + 1) * mg.dx - mg.dx * 0.5
+# x = np.arange(mg.shape[1] + 1) * mg.dy - mg.dy * 0.5
+
+# elev_plot = elev.reshape(mg.shape)
+# elev_profile = np.nanmean(elev_plot, axis=1)
+
+# f, (ax0, ax1) = plt.subplots(1, 2, width_ratios=[4, 1], figsize=(10,5))
+# ls = LightSource(azdeg=135, altdeg=45)
+# ax0.imshow(
+#         ls.hillshade(elev_plot, 
+#             vert_exag=1, 
+#             dx=mg.dx, 
+#             dy=mg.dy), 
+#         origin="lower", 
+#         extent=(x[0], x[-1], y[0], y[-1]), 
+#         cmap='gray',
+#         )
+# for i in range(mg.shape[1]):
+#     ax1.plot(elev_plot[:,i], y[0:-1], alpha=0.1, color='k')
+# ax1.plot(elev_profile, y[0:-1], linewidth=2, color='r')
+
+# ax0.set_xlabel('X [m]')
+# ax0.set_ylabel('Y [m]')
+# ax1.set_xlabel('Z [m]')
+# f.tight_layout()
+# plt.savefig(os.path.join(save_directory, id, "hillshade.png"))
+
+#%%
+
+a = np.array([[0,1]])
+plt.figure(figsize=(1, 3))
+img = plt.imshow(a, cmap="plasma")
+plt.gca().set_visible(False)
+cax = plt.axes([0.1, 0.1, 0.4, 0.8])
+plt.colorbar(orientation="vertical", cax=cax, ticks=[0.0, 0.25, 0.5, 0.75, 1.0])
+# plt.tight_layout()
+plt.savefig(os.path.join(save_directory,id,"colorbar.pdf"))
+
+# plt.axes([])
 # %%
