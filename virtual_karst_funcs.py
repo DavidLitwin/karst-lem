@@ -102,6 +102,7 @@ def get_lower_upper_area(mg, bnds_lower, bnds_upper):
 def calc_ksat(n, D, alpha=1.0, rho=1000, g=9.81, mu=0.0010518):
     """
     Calculate hydraulic conductivity (m/s) from the parallel capillary model (See Vacher and Mylroie 2002).
+    Follows Kozeny-Karman equation.
     
     Parameters:
     -----------
