@@ -141,11 +141,10 @@ dz_ad = np.zeros(mg.size("node"))
 dz_ad[mg.core_nodes] = U * dt
 # dz_ad[top_nodes] += 0.5 * U * dt # effectively decrease the baselevel fall rate of the upper boundary
 
-# we just start with aquifer base at the base of the limestone, because limestone
-# covers the whole surface
+# we just start with aquifer base at the base of the limestone, plus the small weathered thickness underlying limestone (used for continuity)
 rock_id = 1
 zb = mg.add_zeros('node', 'aquifer_base__elevation')
-zb[:] = z - lith.z_bottom[rock_id,:]
+zb[:] = (z - lith.z_bottom[rock_id,:]) - mg.at_node["weathered_thickness"]
 zwt = mg.add_zeros('node', 'water_table__elevation')
 zwt[mg.core_nodes] = z[mg.core_nodes] - 0.2
 
