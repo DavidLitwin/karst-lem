@@ -17,7 +17,7 @@ from virtual_karst_funcs import *
 
 fig_directory = '/Users/dlitwin/Documents/Research/Karst landscape evolution/landlab_virtual_karst/figures'
 save_directory = '/Users/dlitwin/Documents/Research Data/Local/karst_lem'
-id = "flat_dynamic_ksat_11"
+id = "flat_dynamic_ksat_8"
 
 df_out = pd.read_csv(os.path.join(save_directory,id,f'output_{id}.csv'))
 df_params = pd.read_csv(os.path.join(save_directory,id,f'params_{id}.csv')).loc[0]
@@ -117,18 +117,20 @@ plt.savefig(os.path.join(save_directory, id, "recharge.png"))
 
 time = fp.variables['t'][:].data
 elev_max = np.max(fp.variables['topographic__elevation'][:].data)
+runoff_max = np.max(fp.variables['local_runoff'][:].data)
 x = fp.variables['x'][:].data + 0.5 * np.diff(fp.variables['x'][:].data)[0]
 y = fp.variables['y'][:].data + 0.5 * np.diff(fp.variables['y'][:].data)[0]
 X, Y = np.meshgrid(x,y)
 
 for i, t1 in enumerate(time):
 
-    fig = plt.figure(figsize=(8,5))
+    fig = plt.figure(figsize=(9,5))
 
     elev = fp.variables['topographic__elevation'][i,:,:].data
     rockid = fp.variables['rock_type__id'][i,:,:].data
     local_runoff = fp.variables['local_runoff'][i,:,:].data
-    runoff_ma = np.ma.masked_array(data=local_runoff, mask=local_runoff<0.5)
+    runoff_limestone = np.ma.masked_array(data=local_runoff, mask=rockid==1)
+    runoff_basement = np.ma.masked_array(data=local_runoff, mask=rockid==0)
 
     ax1 = fig.add_subplot(2,2,2)
     ax1.plot(t, n, color='seagreen')
@@ -157,22 +159,26 @@ for i, t1 in enumerate(time):
 
     ax3 = fig.add_subplot(2,2,1)
 
-    ax3.imshow(
-            rockid,
+    im1 = ax3.imshow(
+            runoff_basement,
             origin="lower", 
             extent=(x[0], x[-1], y[0], y[-1]), 
-            cmap='gray_r',
-            alpha=0.3,
+            cmap='Blues',
+            alpha=1.0,
+            vmin=-1.0,
+            vmax=5,
             )
-    ax3.imshow(
-            runoff_ma,
+    im2 = ax3.imshow(
+            runoff_limestone,
             origin="lower", 
             extent=(x[0], x[-1], y[0], y[-1]), 
-            cmap='plasma',
-            alpha=0.9,
-            vmin=0,
-            vmax=5
+            cmap='Greens',
+            alpha=1.0,
+            vmin=-1.0,
+            vmax=5,
             )
+    cbb = plt.colorbar(im1,label=r'$q_s$ Basement', shrink=0.5)
+    cbb = plt.colorbar(im2,label=r'$q_s$ Limestone', shrink=0.5)
 
     ax4 = fig.add_subplot(2,2,3, projection='3d')
     surf = ax4.plot_surface(X, 
@@ -195,6 +201,7 @@ for i, t1 in enumerate(time):
     fig.tight_layout()
     plt.savefig(os.path.join(save_directory,id,'%s.%04d.png'%(id,i)), dpi=300)
     plt.close()
+
 
 # %%  images for elevation animation: from appended NETCDF4
 
@@ -275,4 +282,36 @@ plt.colorbar(orientation="vertical", cax=cax, ticks=[0.0, 0.25, 0.5, 0.75, 1.0])
 plt.savefig(os.path.join(save_directory,id,"colorbar.pdf"))
 
 # plt.axes([])
+# %% cross section through domain
+
+file = os.path.join(save_directory,id,f'grid_{id}.nc')
+fp = Dataset(file, "r", format="NETCDF4")
+z = fp.variables['topographic__elevation'][:].data
+zb = fp.variables['aquifer_base__elevation'][:].data
+zwb = zb+0.5
+
+
+wt = fp.variables['water_table__elevation'][:].data
+x = fp.variables['x'][:].data
+y = fp.variables['y'][:].data
+t = fp.variables['t'][:].data
+X, Y = np.meshgrid(x,y)
+nt = 10
+nx = 75
+
+#%%
+fig, axs = plt.subplots(figsize=(4,1.5))
+
+axs.plot(y,z[nt, :, nx], color='k', linewidth=0.25)
+axs.fill_between(y,z[nt, :, nx],zb[nt, :, nx],facecolor='#EBEBEB' ) # permeable rock
+axs.fill_between(y,wt[nt, :, nx],zb[nt, :, nx],facecolor='#2481E9', alpha=1.0) # aquifer
+axs.fill_between(y,zb[nt, :, nx],np.zeros_like(zb[nt, :, nx]),facecolor='#808080') # impermeable
+axs.set_xlim((min(y),max(y)))
+axs.set_ylim((0,np.nanmax(z[:, :, nx])*1.05))
+axs.spines['right'].set_visible(False)
+axs.spines['top'].set_visible(False)
+plt.tight_layout()
+plt.savefig(os.path.join(save_directory,id,f"XS_{nt}.pdf"), transparent=True, dpi=300)
+
+
 # %%
