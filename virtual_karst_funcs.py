@@ -1,9 +1,13 @@
 
-
+import copy
 import numpy as np
 
 from landlab.utils import get_watershed_mask
 from landlab.grid.mappers import map_max_of_node_links_to_node
+from landlab.components import (
+    FlowAccumulator,
+    LakeMapperBarnes,
+)
 
 def find_nearest(array, value):
     """Return index and value nearest to a value in an array."""
@@ -99,6 +103,40 @@ def get_lower_upper_area(mg, bnds_lower, bnds_upper):
     area = mg.at_node['drainage_area']
     return np.sum(area[bnds_lower]), np.sum(area[bnds_upper])
 
+
+def generate_conditioned_surface(mg, dip_func=lambda x, y: 0*x + 0*y, noise_coeff=0.01, random_seed=1123):
+
+    mg1 = copy.copy(mg)
+    z_surf = mg1.add_zeros("node", "surface__elevation")
+    np.random.seed(random_seed)
+    z_surf += dip_func(mg1.x_of_node,mg1.y_of_node) + noise_coeff * np.random.rand(len(z_surf))
+    z_surf0 = z_surf.copy()
+
+    # flow management for the topographic surface, routing only infiltration excess
+    fa1 = FlowAccumulator(
+        mg1,
+        surface="surface__elevation",
+        flow_director='FlowDirectorD8',
+    )
+    lmb1 = LakeMapperBarnes(
+        mg1,
+        method="D8",
+        fill_flat=False,
+        surface="surface__elevation",
+        fill_surface="surface__elevation",
+        redirect_flow_steepest_descent=False,
+        reaccumulate_flow=False,
+        track_lakes=False,
+        ignore_overfill=True,
+    )
+    lmb1.run_one_step()
+    fa1.run_one_step()
+
+    print(np.sum(np.abs(z_surf0-z_surf)))
+    return z_surf
+
+
+
 def calc_ksat(n, D, alpha=1.0, rho=1000, g=9.81, mu=0.0010518):
     """
     Calculate hydraulic conductivity (m/s) from the parallel capillary model (See Vacher and Mylroie 2002).
@@ -151,3 +189,88 @@ def calc_porosity_logistic(t, t0, k, D0, Df, n0, nf):
 
     return (nf - n0)/(Df - D0) * ((Df - D0) / (1 + np.exp(-k * (t - t0)))) + n0
 
+def calc_ceq(Tc, gam_ca, gam_hco3, Pco2):
+    """
+    inputs:
+    K1, Kc, Kh: fast reaction equilibrium coefficients
+    gam_ca: activity coefficient for calcium
+    gam_hco3: activity coefficient for bicarbonate
+    Pco2: carbon dioxide partial pressure
+    
+    returns:
+    ceq: calcium equilibrium concentration
+    """
+
+    T = 273.16 + Tc
+    K1 = np.exp(- 356.3094 - 0.06091964*T + 21834.37/T + 126.8339*np.log(T) - 1684915 / T)
+    K2 = np.exp(- 107.8871 - 0.03252849*T + 5151.79/T + 38.92561*np.log(T) - 563713.9 / T)
+    Kc = np.exp(-171.9065 - 0.077993*T + 2839.319/T + 71.595*np.log(T))
+    Kh = np.exp(108.3865 + 0.01985076*T - 6919.53/T - 40.45154*np.log(T) + 669365 / T)
+
+    ceq = ((K1*Kc*Kh*Pco2)/(4*K2*gam_ca*gam_hco3))**(1/3)
+    return ceq
+
+def calc_max_chem_denudation(Tc, Pco2, rho, P, AET):
+    """
+    inputs:
+    K1, Kc, Kh: fast reaction equilibrium coefficients
+    Pco2: carbon dioxide partial pressure
+    Tc: Temperature (deg C)
+    P: precipitation (m/yr)
+    AET: actual evapotranspiration (m/yr)
+    
+    returns:
+    E: chemical denudation (m/yr)
+    """
+
+    T = 273.16 + Tc
+    K1 = np.exp(- 356.3094 - 0.06091964*T + 21834.37/T + 126.8339*np.log(T) - 1684915 / T)
+    K2 = np.exp(- 107.8871 - 0.03252849*T + 5151.79/T + 38.92561*np.log(T) - 563713.9 / T)
+    Kc = np.exp(-171.9065 - 0.077993*T + 2839.319/T + 71.595*np.log(T))
+    Kh = np.exp(108.3865 + 0.01985076*T - 6919.53/T - 40.45154*np.log(T) + 669365 / T)
+
+    E = 1/(10 * rho) * ((Kc*K1*Kh*Pco2)/(K2*4))**(1/3) * (P - AET)
+    return E
+
+
+def calc_T_lapse(z, Tc0=15, Lr=6.5):
+    """
+    inputs:
+    z: topographic elevation (m)
+    T0: temperature at sealevel (dec C) Default=15 (Standard Sealevel conditions)
+    Lr: lapse rate (dec C/km)
+    """
+
+    # lapse rate based on international standard atmosphere
+    Tc = Tc0 - Lr * z/1000 
+    return Tc
+
+def calc_P_gaussian(z, P0=0.5, A=2.0, Hp=2000, Dv=1000):
+    """
+    inputs:
+    z: topographic elevation (m)
+    P0: precipitation at sealevel (m/yr)
+    A: maximum additional orographic precipitation (m/yr)
+    Hp: elevation of maximum precipitation (m)
+    Dv: width of gradient (m)
+    """
+
+    # Precipitation Gaussian (Zavala et al 2020, Basin Research)
+    P = P0 + A * np.exp((z-Hp)**2/(2*Dv**2))
+    
+    return P
+
+# def calc_AET_linear(z, P, AET0, ):
+#     """
+#     inputs:
+#     z: topographic elevation (m)
+#     P0: precipitation at sealevel (m/yr)
+#     A: maximum additional orographic precipitation (m/yr)
+#     Hp: elevation of maximum precipitation (m)
+#     Dv: width of gradient (m)
+#     """
+
+#     # Precipitation Gaussian (Zavala et al 2020, Basin Research)
+#     P = P0 + A * np.exp((z-Hp)**2/(2*Dv**2))
+    
+#     return P
