@@ -6,12 +6,14 @@ import pandas as pd
 from tqdm import tqdm
 
 import matplotlib.pyplot as plt
+from matplotlib import colors
 
 from landlab import RasterModelGrid
 from landlab.components import (
     FastscapeEroder, 
     FlowAccumulator,
     FlowDirectorD8,
+    FlowDirectorSteepest,
     LakeMapperBarnes,
     LinearDiffuser,
     GroundwaterDupuitPercolator,
@@ -30,8 +32,8 @@ D = 1e-3 # diffusivity (m2/yr)
 
 b = 20
 n = 0.01
-ksat = 1000 / (365 * 24 * 3600)
-r = 1e-8 # total runoff m/s
+ksat = 20 / (3600*24)
+r = 0.1 / (3600*24) # total runoff m/s
 
 N = 500 # number of geomorphic timesteps
 dt = 500 # geomorphic timestep (yr)
@@ -58,9 +60,11 @@ save_vals = [
 
 #%% set up grid and lithology
 
-Nx = 100
+
+Nx = 50
 Ny = 50
 dx = 10
+channel_x = (dx * Nx) // 2
 mg = RasterModelGrid((Ny,Nx), xy_spacing=dx)
 mg.set_closed_boundaries_at_grid_edges(right_is_closed=True,
                                        left_is_closed=True,
@@ -72,13 +76,26 @@ z = mg.add_zeros("node", "topographic__elevation")
 z += 0.1*np.random.rand(len(z))
 z[mg.core_nodes] += b #force thickness to zero at boundary
 # z[np.where(mg.y_of_node==dx)[0][::10]] = 0.1
-z[np.where(mg.x_of_node==500)[0][0:Ny//2]] = np.linspace(0,b/2,Ny//2)
+z[np.where(mg.x_of_node==channel_x)[0][0:Ny//2]] = np.linspace(0,b/2,Ny//2)
 zb = mg.add_zeros('node', 'aquifer_base__elevation')
 zwt = mg.add_zeros('node', 'water_table__elevation')
-zwt[:] = 0.9*b
+zwt[:] = 0.8*z
 
 # exfiltration
-q_ex = mg.add_zeros("node", "exfiltration")
+qex = mg.add_zeros("node", "exfiltration")
+
+plt.figure()
+mg.imshow('topographic__elevation')
+
+#%%
+
+plt.figure()
+inds = np.where(mg.x_of_node==channel_x)[0][0:Ny]
+plt.fill_between(mg.y_of_node[inds], z[inds], y2=0, color='0.5')
+plt.fill_between(mg.y_of_node[inds], zwt[inds], y2=0, color='dodgerblue')
+plt.xlabel('y coordinate')
+plt.ylabel('elevation')
+
 
 
 #%%
@@ -89,7 +106,7 @@ gdp = GroundwaterDupuitPercolator(
     porosity=n,
     recharge_rate=r,
 )
-fd = FlowDirectorD8(mg)
+fd = FlowDirectorSteepest(mg)
 fa = FlowAccumulator(
     mg,
     surface="topographic__elevation",
@@ -112,6 +129,118 @@ fs = FastscapeEroder(mg, K_sp=K, discharge_field='surface_water__discharge')
 ld = LinearDiffuser(mg, linear_diffusivity=D)
 
 lmb.run_one_step()
+
+#%% Single step test
+
+wt_delta = 1
+wt_iter = 0
+while wt_delta > 1e-5:
+
+    zwt0 = zwt.copy()
+    gdp.run_with_adaptive_time_step_solver(dt_gw)
+    wt_delta = np.mean(np.abs(zwt0 - zwt))/(dt_gw/3600)
+
+    wt_iter += 1
+
+fd.run_one_step()
+
+#%%
+
+# initialize updated qs field
+qs = mg.at_node['surface_water__specific_discharge']
+qs[np.isnan(qs)] = 0
+qs_update = qs.copy()
+frl = mg.at_node['flow__link_to_receiver_node']
+frn = mg.at_node['flow__receiver_node']
+
+# exfiltration at recevier is the amount that qs exceeds recharge.
+qex[mg.core_nodes] = np.maximum(qs[mg.core_nodes] - r ,0)
+qex_receiver = qex[frn]
+
+##  allocation should scale with flux into receiver (optional -- need to think about how to incorporate this)
+# sign_link_into_receiver = (mg.node_at_link_head[frl] == frn)*2 - 1
+# flux = mg.at_link['groundwater__specific_discharge'][frl] * sign_link_into_receiver
+# faces = mg.face_at_link[frl]
+# face_widths = mg.length_of_face[faces]
+# flux_norm = (flux * face_widths / mg.cell_area_at_node[frn])/qex_receiver
+# flux_norm[np.isnan(flux_norm)] = 0
+# flux_norm[np.isinf(flux_norm)] = 0
+
+## allocation should scale with flux into node (optional)
+# gw = - mg.at_link["groundwater__specific_discharge"][mg.links_at_node] * mg.link_dirs_at_node
+# gw[gw<0] = 0
+# gw_rel = gw / (gw.sum(axis=1).reshape((len(gw),1)) + np.spacing(1))
+# gw_rel[gw_rel<0] = 0
+
+# gw_rel_frl = np.zeros_like(qex_receiver)
+# for n, rl in enumerate(frl):
+#     if rl != -1:
+#         lan = mg.links_at_node[n,:]
+#         ind = np.where(lan==rl)[0]
+#         gw_rel_frl[n] = gw_rel[n,ind]
+#         if ind.size == 0:
+#             print('empty')
+
+# allocation from receiver to upstream is proportional to slope
+gr = np.abs(mg.calc_grad_at_link(z)) # comfortable taking abs because slope should always be toward receiver
+sinegr = np.sin(np.arctan(gr)) # use sine -- zero when slope is zero between source and receiver, maximum in the limit pure vertical
+sinegr_receiver = sinegr[frl]
+
+# add up to 0.25 of exfiltration from receiver with exfiltration to upstream node. Remove from receiver.
+# 0.25 because this ensures that we never exceed 1 for raster grid with 4 possible receivers. 
+# More complex way would be to set a value based on the flux contribution, calculated above.
+for n, rn in enumerate(frn):
+    value = 0.25 * sinegr_receiver[n] * qex_receiver[n] # * gw_rel_frl[n]
+    qs_update[n] += value
+    qs_update[rn] -= value
+
+
+## does not vectorize right...
+# values = 0.25 * sinegr_receiver * qex_receiver
+# qs_update += values
+# qs_update[frn] -= values
+
+assert np.sum(qs_update) == np.sum(qs)
+
+#%%
+
+
+# rg = RasterModelGrid((5, 5), xy_spacing=10.0)
+# z = rg.add_zeros("topographic__elevation", at="node")
+# z[:] = 50.0
+# z[10:14] = 25
+# rg.imshow(z)
+# hg = rg.calc_grad_at_link(z)
+# gr = - rg.calc_grad_at_link(z)[rg.links_at_node] * rg.link_dirs_at_node
+# np.sum(gr>0, axis=1)
+
+# nalh = rg.node_at_link_head
+# nalt = rg.node_at_link_tail
+
+#%%
+q=mg.at_node['surface_water__specific_discharge']
+q[mg.open_boundary_nodes] = 0
+mg.imshow('surface_water__specific_discharge', cmap='plasma')
+
+fig, ax = plt.subplots()
+inds = np.where(mg.x_of_node==channel_x)[0][0:Ny]
+ax.fill_between(mg.y_of_node[inds], z[inds], y2=0, color='0.5')
+ax.fill_between(mg.y_of_node[inds], zwt[inds], y2=0, color='dodgerblue')
+ax.scatter(mg.y_of_node[inds], zwt[inds], c='k', s=5)
+ax.set_xlabel('y coordinate')
+ax.set_ylabel('elevation')
+ax.set_ylim((0,2*max(z)))
+
+ax1 = plt.twinx()
+ax1.plot(mg.y_of_node[inds], q[inds])
+ax1.plot(mg.y_of_node[inds], qs_update[inds])
+ax1.set_ylim(2*max(q),0)
+
+
+plt.figure()
+qs_update[mg.open_boundary_nodes] = 0
+mg.imshow(qs_update, cmap='plasma')
+
 
 #%% run forward
 
@@ -138,7 +267,7 @@ for i in tqdm(range(N)):
     
 
     # local runoff is sum of saturation and infiltration excess. Convert units to m/yr. 
-    q_ex[mg.core_nodes] = np.maximum(mg.at_node['average_surface_water__specific_discharge'][mg.core_nodes] -r ,0)
+    qex[mg.core_nodes] = np.maximum(mg.at_node['average_surface_water__specific_discharge'][mg.core_nodes] -r ,0)
 
     # update areas
     fa.run_one_step()
