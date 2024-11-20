@@ -27,8 +27,8 @@ from landlab.components import (
 
 from virtual_karst_funcs import *
 
-save_directory = '/Users/dlitwin/Documents/Research/Karst-landscape-evolution/landlab_virtual_karst/figures'
-filename = "virtual_karst_surface_3"
+save_directory = '/Users/dlitwin/Documents/Research/Karst-landscape-evolution/landlab_virtual_karst/'
+filename = "virtual_karst_surface_6"
 
 #%% parameters
 
@@ -42,10 +42,10 @@ D_ld = 1e-3 # diffusivity (m2/yr)
 
 b_limestone = 50 # limestone unit thickness (m)
 b_basement = 1000 # basement thickness (m)
-bed_dip = 0.000 #0.002 # dip of bed (positive = toward bottom boundary)
+bed_dip = 0.0001 #0.002 # dip of bed (positive = toward bottom boundary)
 
 r_tot = 1.0 #/ (3600 * 24 * 365) # total runoff m/yr
-ie_frac = 0.1 # fraction of r_tot that becomes overland flow on limestone. ie_frac on basement=1. 
+ie_frac = 0.0 # fraction of r_tot that becomes overland flow on limestone. ie_frac on basement=1. 
 # ibar = 1e-3 / 3600 # mean storm intensity (m/s) equiv. 1 mm/hr 
 
 T = 2e6 # total geomorphic time
@@ -55,7 +55,7 @@ N = int(T//dt) # number of geomorphic timesteps
 Nx = 150
 Ny = 100
 dx = 50
-noise_scale = 0.01
+noise_scale = 0.1
 
 save_freq = 25 # steps between saving output
 Ns = N//save_freq
@@ -242,19 +242,26 @@ for i in tqdm(range(N)):
     q_ie[mg.core_nodes] = mg.at_node['ie_frac'][mg.core_nodes] * r_tot
     r[mg.core_nodes] = (1 - mg.at_node['ie_frac'][mg.core_nodes]) * r_tot
 
-    # get flow directions and discharge on the topographic surface
-    # first set discharge field to infiltration excess rate
-    mg.at_node['water__unit_flux_in'][:] = q_ie
-    lmb1.run_one_step()
-    fa1.run_one_step()
-    Q1[:] = mg.at_node['surface_water__discharge'].copy()
+    if (q_ie > 0.0).any():
+        # get flow directions and discharge on the topographic surface
+        # first set discharge field to infiltration excess rate
+        mg.at_node['water__unit_flux_in'][:] = q_ie
+        lmb1.run_one_step()
+        fa1.run_one_step()
+        Q1[:] = mg.at_node['surface_water__discharge'].copy()
+    else:
+        Q1[:] = np.zeros_like(Q1)
 
-    # get flow directions and discharge on the basement surface. Some of this is in the karst.
-    # first set discharge equal to recharge field
-    mg.at_node['water__unit_flux_in'][:] = r
-    lmb2.run_one_step()
-    fa2.run_one_step()
-    Q2[:] = mg.at_node['surface_water__discharge'].copy()
+
+    if (r > 0.0).any():
+        # get flow directions and discharge on the basement surface. Some of this is in the karst.
+        # first set discharge equal to recharge field
+        mg.at_node['water__unit_flux_in'][:] = r
+        lmb2.run_one_step()
+        fa2.run_one_step()
+        Q2[:] = mg.at_node['surface_water__discharge'].copy()
+    else:
+        Q2[:] = np.zeros_like(Q2)
 
     # add conditionally to get total surface water discharge
     Q2_masked = np.zeros_like(Q2)
@@ -284,7 +291,7 @@ for i in tqdm(range(N)):
             ds[of][i//save_freq, :, :] = mg["node"][of].reshape(mg.shape)
 
 
-ds.to_netcdf(os.path.join(save_directory,f"{filename}.nc"))
+ds.to_netcdf(os.path.join(save_directory,'virtual_karst_surface',f"{filename}.nc"))
 
 
 # %% plot topographic change
@@ -292,15 +299,15 @@ ds.to_netcdf(os.path.join(save_directory,f"{filename}.nc"))
 # topography
 plt.figure()
 mg.imshow("topographic__elevation", colorbar_label='Elevation [m]')
-plt.savefig(os.path.join(save_directory,f"{filename}_elevation.png"))
+plt.savefig(os.path.join(save_directory,'virtual_karst_surface', f"{filename}_elevation.png"))
 
 plt.figure()
 mg.imshow("rock_type__id", cmap="viridis", colorbar_label='Rock ID')
-plt.savefig(os.path.join(save_directory,f"{filename}_rockid.png"))
+plt.savefig(os.path.join(save_directory,'virtual_karst_surface', f"{filename}_rockid.png"))
 
 plt.figure()
 mg.imshow('total_discharge', cmap="plasma", colorbar_label='Discharge')
-plt.savefig(os.path.join(save_directory,f"{filename}_totalQ.png"))
+plt.savefig(os.path.join(save_directory,'virtual_karst_surface', f"{filename}_totalQ.png"))
 
 
 # %%
