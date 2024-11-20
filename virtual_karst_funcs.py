@@ -171,6 +171,22 @@ def calc_pore_diam_logistic(t, t0, k, D0, Df):
     """
     return (Df-D0) / (1 + np.exp(-k * (t - t0))) + D0
 
+def calc_increase_logistic(t, t0, k, x0, xf):
+    """
+    Calculate the increase in some quantity assuming a logistic increase in
+    diameter with time.
+
+    Parameters:
+    ----------
+    t: time (T)
+    t0: logistic midpoint (T)
+    k: logistic growth rate/steepness (1/T)
+    x0: initial value
+    xf: final value
+
+    """
+    return (xf-x0) / (1 + np.exp(-k * (t - t0))) + x0
+
 def calc_porosity_logistic(t, t0, k, D0, Df, n0, nf):
     """
     Calculate porosity assuming a linear increase in porosity with eqivalent pore diameter, and a 
@@ -186,8 +202,12 @@ def calc_porosity_logistic(t, t0, k, D0, Df, n0, nf):
     n0: initial porosity (-)
     nf: final porosity (-)
     """
+    if np.abs(D0-Df) > 0:
+        val = (nf - n0)/(Df - D0) * ((Df - D0) / (1 + np.exp(-k * (t - t0)))) + n0
+    else:
+        val = n0
 
-    return (nf - n0)/(Df - D0) * ((Df - D0) / (1 + np.exp(-k * (t - t0)))) + n0
+    return val
 
 def calc_ceq(Tc, gam_ca, gam_hco3, Pco2):
     """
