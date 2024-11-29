@@ -32,7 +32,7 @@ from landlab.grid.mappers import map_value_at_max_node_to_link
 from virtual_karst_funcs import *
 
 save_directory = '/Users/dlitwin/Documents/Research/Karst-landscape-evolution/landlab_virtual_karst/virtual_karst_surface_gw/'
-filename = "virtual_karst_surface_gw_2"
+filename = "virtual_karst_surface_gw_test"
 
 #%% parameters
 
@@ -70,7 +70,7 @@ ibar = 1e-3 / 3600 # mean storm intensity (m/s) equiv. 1 mm/hr
 wt_delta_tol = 1e-6 # acceptable rate of water table change before moving on (m/s)
 dt_gw = 1 * 24 * 3600 # groundwater timestep (s)
 
-T = 5e6 # total geomorphic time (yr)
+T = 1e6 # total geomorphic time (yr)
 dt = 500 # geomorphic timestep (yr)
 N = int(T//dt) # number of geomorphic timesteps
 
@@ -108,7 +108,7 @@ attrs = {
          }
 
 lith = LithoLayers(
-    mg, layer_elevations, layer_ids, function=lambda x, y: - bed_dip * y + noise_scale*np.random.rand(len(y)), attrs=attrs
+    mg, layer_elevations, layer_ids, function=lambda x, y: - bed_dip * y + noise_scale*np.random.rand(len(y)), attrs=attrs, layer_type='MaterialLayers'
 )
 dz_ad = np.zeros(mg.size("node"))
 dz_ad[mg.core_nodes] = U * dt
@@ -154,6 +154,7 @@ rock_ID = mg.at_node['rock_type__id']
 
 #%% instantiate components 
 
+# groundwater model
 gdp = GroundwaterDupuitPercolator(
     mg, 
     hydraulic_conductivity='Ksat',
@@ -183,7 +184,6 @@ lmb1 = LakeMapperBarnes(
     ignore_overfill=True,
 )
 
-
 # flow management for the basement surface, assuming all recharge accumulates at the base of
 # the limestone, which is the top of the basement. Recharge only occurs on limestone. On the 
 # basement it is set to zero. runoff_rate="recharge_rate", 
@@ -205,6 +205,7 @@ lmb2 = LakeMapperBarnes(
     ignore_overfill=True,
 )
 
+# erosion components
 fs2 = FastscapeEroder(mg, K_sp=K_sp, m_sp=m_sp, n_sp=n_sp, discharge_field='total_discharge')
 ld2 = LinearDiffuser(mg, linear_diffusivity=D_ld)
 
@@ -357,13 +358,11 @@ for i in tqdm(range(N)):
     #     h[:] = np.zeros_like(h)
     #     zwt[:] = zb
 
-
     # local runoff is sum of saturation and infiltration excess.
     # use surface_water__specific_discharge rather than average because we are going for steady-state (end of timestep)
     q_local[mg.core_nodes] = (mg.at_node['surface_water__specific_discharge'][mg.core_nodes] + 
                               mg.at_node['infiltration_excess'][mg.core_nodes])
     qe_local[mg.core_nodes] = np.maximum(0, mg.at_node['average_surface_water__specific_discharge'][mg.core_nodes]-r_m[mg.core_nodes])
-
 
     if (q_local > 0.0).any():
         # first set discharge field to Horton+Dunne runoff rate. Convert units to m/yr. 
@@ -371,10 +370,9 @@ for i in tqdm(range(N)):
         mg.at_node['water__unit_flux_in'][:] = q_local * 3600 * 24 * 365
         lmb1.run_one_step()
         fa1.run_one_step()
-        Q1[:] = mg.at_node['surface_water__discharge'].copy()
+        Q1[:] = mg.at_node['surface_water__discharge']
     else:
         Q1[:] = np.zeros_like(Q1)
-
 
     if (r_c > 0.0).any():
         # first set discharge equal to conduit recharge rate. Convert units to m/yr. 
@@ -382,7 +380,7 @@ for i in tqdm(range(N)):
         mg.at_node['water__unit_flux_in'][:] = r_c * 3600 * 24 * 365
         lmb2.run_one_step()
         fa2.run_one_step()
-        Q2[:] = mg.at_node['surface_water__discharge'].copy()
+        Q2[:] = mg.at_node['surface_water__discharge']
     else:
         Q2[:] = np.zeros_like(Q2)
 
@@ -406,7 +404,7 @@ for i in tqdm(range(N)):
     zk[:] = z-lith.z_top[0,:]
 
     # update lower aquifer boundary condition
-    zb[mg.core_nodes] = ((z - lith.z_bottom[1,:]) - mg.at_node["weathered_thickness"])[mg.core_nodes]
+    zb[mg.core_nodes] = (zk - mg.at_node["weathered_thickness"])[mg.core_nodes]
 
     # something to handle the aquifer itself - see regolith models in DupuitLEM
     # this should cover it, but again check boundary conditions
@@ -423,12 +421,12 @@ for i in tqdm(range(N)):
     df_out.loc[i,'max__elevation'] = np.max(z[mg.core_nodes])
     df_out.loc[i,'denudation__rate'] = -np.mean((z - z0 - U*dt)[mg.core_nodes])
     df_out.loc[i,'median_aquifer_thickness'] = np.median(h[mg.core_nodes])
-    at, ab = get_lower_upper_area(mg, bottom_nodes, top_nodes)
-    df_out.loc[i,'area_lower'] = ab
-    df_out.loc[i,'area_upper'] = at
-    Qt, Qb = get_lower_upper_water_flux(mg, bottom_nodes, top_nodes)
-    df_out.loc[i,'discharge_lower'] = Qb
-    df_out.loc[i,'discharge_upper'] = Qt
+    # at, ab = get_lower_upper_area(mg, bottom_nodes, top_nodes)
+    # df_out.loc[i,'area_lower'] = ab
+    # df_out.loc[i,'area_upper'] = at
+    # Qt, Qb = get_lower_upper_water_flux(mg, bottom_nodes, top_nodes)
+    # df_out.loc[i,'discharge_lower'] = Qb
+    # df_out.loc[i,'discharge_upper'] = Qt
     df_out.loc[i,'ksat_limestone'] = ksat
     df_out.loc[i,'n_limestone'] = n
     df_out.loc[i,'conduit_frac'] = f_cond
@@ -436,17 +434,14 @@ for i in tqdm(range(N)):
     df_out.loc[i,'mean_r_conduit'] = np.mean(r_c[mg.core_nodes])
     df_out.loc[i,'mean_r_matrix'] = np.mean(r_m[mg.core_nodes])
 
-
     if i%save_freq==0:
-        # print(f"Finished iteration {i}")
-
         for of in output_fields:
             ds[of][i//save_freq, :, :] = mg["node"][of].reshape(mg.shape)
 
 
 ds.to_netcdf(os.path.join(save_directory, f"{filename}.nc"))
 
-df_out['time'] = np.arange(0,N*dt,dt)
+df_out['time'] = np.arange(0, N*dt, dt)
 df_out.set_index('time', inplace=True)
 df_out.to_csv(os.path.join(save_directory, f"output_{filename}.csv"))
 
