@@ -17,14 +17,15 @@ from virtual_karst_funcs import *
 
 fig_directory = '/Users/dlitwin/Documents/Research/Karst landscape evolution/landlab_virtual_karst/figures'
 save_directory = '/Users/dlitwin/Documents/Research Data/Local/karst_lem'
-id = "flat_dynamic_ksat_8"
+id = "virtual_karst_surface_gw_2"
 
 df_out = pd.read_csv(os.path.join(save_directory,id,f'output_{id}.csv'))
 df_params = pd.read_csv(os.path.join(save_directory,id,f'params_{id}.csv')).loc[0]
 
 #%%
 
-file = os.path.join(save_directory,id,f'grid_{id}.nc')
+# file = os.path.join(save_directory,id,f'grid_{id}.nc')
+file = os.path.join(save_directory,id,f'{id}.nc')
 fp = Dataset(file, "r", format="NETCDF4")
 elev = fp.variables['topographic__elevation'][-1,:,:].data
 rid = fp.variables['rock_type__id'][-1,:,:].data
@@ -72,7 +73,8 @@ plt.savefig(os.path.join(save_directory, id, "limestone_props.png"))
 
 
 fig, ax = plt.subplots()
-ax.plot(t, df_out['limestone_exposed'], color='darkgoldenrod')
+# ax.plot(t, df_out['limestone_exposed'], color='darkgoldenrod')
+ax.plot(t, df_out['limestone_exposed__area'], color='darkgoldenrod')
 ax.set_ylim((0.0,1.01))
 ax.set_ylabel('Limestone exposed (-)', color='darkgoldenrod')
 ax.set_xlabel('Time (yr)')
@@ -115,7 +117,8 @@ plt.savefig(os.path.join(save_directory, id, "recharge.png"))
 
 # %% Big figure (to animate?)
 
-time = fp.variables['t'][:].data
+# time = fp.variables['t'][:].data
+time = fp['time'][:].data
 elev_max = np.max(fp.variables['topographic__elevation'][:].data)
 runoff_max = np.max(fp.variables['local_runoff'][:].data)
 x = fp.variables['x'][:].data + 0.5 * np.diff(fp.variables['x'][:].data)[0]
@@ -145,7 +148,8 @@ for i, t1 in enumerate(time):
     ax1t.set_ylim((0.0,1.02*np.max(ksat)))
 
     ax2 = fig.add_subplot(2,2,4)
-    ax2.plot(t, df_out['limestone_exposed'], color='darkgoldenrod')
+    # ax2.plot(t, df_out['limestone_exposed'], color='darkgoldenrod')
+    ax2.plot(t, df_out['limestone_exposed__area'], color='darkgoldenrod')
     ax2.axvline(x=t1, linestyle='--', color='r')
     ax2.set_ylim((0.0,1.01))
     ax2.set_ylabel('Limestone exposed (-)', color='darkgoldenrod')
@@ -205,12 +209,13 @@ for i, t1 in enumerate(time):
 
 # %%  images for elevation animation: from appended NETCDF4
 
-file = os.path.join(save_directory,id,f'grid_{id}.nc')
-fp = Dataset(file, "r", format="NETCDF4")
+# file = os.path.join(save_directory,id,f'grid_{id}.nc')
+# fp = Dataset(file, "r", format="NETCDF4")
 elev = fp.variables['topographic__elevation'][:].data
 x = fp.variables['x'][:].data
 y = fp.variables['y'][:].data
-t = fp.variables['t'][:].data
+# t = fp.variables['t'][:].data
+t = fp.variables['time'][:].data
 X, Y = np.meshgrid(x,y)
 elev_max = np.max(elev)
 
