@@ -8,6 +8,8 @@ goes to the unconfined aquifer. Discharge is the sum of the infiltration excess 
 saturation excess (Dunne), routed on topography, and the conduit discharge routed on the
 contact surface or topography where contact is eroded away. Conduit recharge happens only
 on the limestone.
+
+Use PriorityFlood for flow routing and depressions
 """
 
 #%%
@@ -23,17 +25,17 @@ from landlab.components import (
     FastscapeEroder, 
     FlowAccumulator,
     LakeMapperBarnes,
-    DepressionFinderAndRouter,
+    PriorityFloodFlowRouter,
     LinearDiffuser,
     LithoLayers,
     GroundwaterDupuitPercolator,
 )
 from landlab.grid.mappers import map_value_at_max_node_to_link
-
 from virtual_karst_funcs import *
 
-save_directory = '/Users/dlitwin/Documents/Research/Karst-landscape-evolution/landlab_virtual_karst/virtual_karst_surface_gw/'
-filename = "virtual_karst_surface_gw_test"
+save_directory = '/Users/dlitwin/Documents/Research Data/Local/karst_lem'
+filename = "virtual_karst_conduit_gw_PF_1"
+os.mkdir(os.path.join(save_directory,filename))
 
 #%% parameters
 
@@ -49,19 +51,10 @@ b_limestone = 30 # limestone unit thickness (m)
 b_basement = 1000 # basement thickness (m)
 bed_dip = 0.0 #0.002 # dip of bed (positive = toward bottom boundary)
 
-D0 = 2e-5 # initial eq diameter (m) # D=1e-4 and n=0.005 give ksat=1.5e-5 similar to sauter (1992) Fissured limestone
-Df = 2e-5 # final eq diameter (m)
-n0 = 0.002 # initial porosity (-)
-nf = 0.002 # final porosity (-)
-conduit_frac_0 = 0.0 # fraction of recharge that goes to the conduit system versus the matrix
-conduit_frac_f = 0.5 # fraction of recharge that goes to the conduit system versus the matrix
-t0 = 5e5 #1.25e6 # midpoint of logistic (yr)
-kt = 2e-5 #1/1e5 # sharpness of logistic (1/yr)
-
-ksat_limestone = calc_ksat(n0, D0) # ksat limestone (m/s)
+ksat_limestone = 1.5e-5 # ksat limestone (m/s) ksat=1.5e-5 similar to sauter (1992) Fissured limestone
 ksat_basement = 1e-6 # ksat basement (m/s) # 1e-7: fine grained sedimentary (Gleeson)
-n_limestone = n0 # drainable porosity 
-conduit_frac = conduit_frac_0 # initial fraction of recharge going to conduits
+n_limestone = 0.002 # drainable porosity 
+conduit_frac = 0.5 # initial fraction of recharge going to conduits
 n_weathered_basement = 0.005 # drainable porosity 
 b_weathered_basement = 0.5 # thickness of regolith that can host aquifer in basement (m)
 
@@ -170,43 +163,23 @@ h = mg.at_node['aquifer__thickness']
 
 # flow management for the topographic surface. runoff_rate="infiltration_excess",
 # but we will only set this with water__unit_flux_in before running to avoid overwriting.
-fa1 = FlowAccumulator(
+fa1 = PriorityFloodFlowRouter(
     mg,
     surface="topographic__elevation",
-    flow_director='FlowDirectorD8',
+    flow_metric='D8',
+    # depression_handler='breach',
 )
-lmb1 = LakeMapperBarnes(
-    mg,
-    method="D8",
-    fill_flat=False,
-    surface="topographic__elevation",
-    fill_surface="topographic__elevation",
-    redirect_flow_steepest_descent=False,
-    reaccumulate_flow=False,
-    track_lakes=False,
-    ignore_overfill=True,
-)
-dfr1 = DepressionFinderAndRouter(mg)
+
 
 # flow management for the basement surface, assuming all recharge accumulates at the base of
 # the limestone, which is the top of the basement. Recharge only occurs on limestone. On the 
 # basement it is set to zero. runoff_rate="recharge_rate", 
 # but we will only set this with water__unit_flux_in before running to avoid overwriting.
-fa2 = FlowAccumulator(
+fa2 = PriorityFloodFlowRouter(
     mg,
     surface="karst__elevation",
-    flow_director='FlowDirectorD8',
-)
-lmb2 = LakeMapperBarnes(
-    mg,
-    method="D8",
-    fill_flat=False,
-    surface="karst__elevation",
-    fill_surface="karst__elevation",
-    redirect_flow_steepest_descent=False,
-    reaccumulate_flow=False,
-    track_lakes=False,
-    ignore_overfill=True,
+    flow_metric='D8',
+    # depression_handler='breach',
 )
 
 # erosion components
@@ -240,9 +213,6 @@ save_vals = ['limestone_exposed__area',
             'limestone_upper',
             'limestone_lower',
             'wt_iterations',
-            'ksat_limestone',
-            'n_limestone',
-            'conduit_frac',
             'mean_ie',
             'mean_r_conduit',
             'mean_r_matrix',
@@ -250,8 +220,7 @@ save_vals = ['limestone_exposed__area',
 df_out = pd.DataFrame(np.zeros((N,len(save_vals))), columns=save_vals)
 params = {'U':U, 'K':K_sp, 'D_ld':D_ld, 'm_sp':m_sp,
             'E_limestone': E_limestone, 'E_weathered_basement':E_weathered_basement,
-            'n_sp':n_sp, 'D0':D0, 'Df':Df, 'n0':n0, 'nf':nf, 'conduit_frac_0':conduit_frac_0,
-            'conduit_frac_f':conduit_frac_f, 't0':t0, 'kt':kt, 
+            'n_sp':n_sp, 'conduit_frac':conduit_frac,
             'b_limestone':b_limestone, 'b_basement':b_basement, 'bed_dip':bed_dip,
             'ksat_limestone':ksat_limestone, 'ksat_basement':ksat_basement, 
             'n_limestone':n_limestone,'n_weathered_basement':n_weathered_basement,
@@ -259,7 +228,7 @@ params = {'U':U, 'K':K_sp, 'D_ld':D_ld, 'm_sp':m_sp,
             'r_tot':r_tot, 'ibar':ibar, 
             'wt_delta_tol':wt_delta_tol, 'T':T, 'N':N, 'dt':dt, 'dt_gw':dt_gw, 'save_freq':save_freq}
 df_params = pd.DataFrame(params, index=[0])
-df_params.to_csv(os.path.join(save_directory, f"params_{filename}.csv"))
+df_params.to_csv(os.path.join(save_directory, filename, f"params_{filename}.csv"))
 
 
 ds = xr.Dataset(
@@ -320,26 +289,12 @@ ds = xr.Dataset(
     },
 )
 ds = ds.assign_attrs(params)
-lmb2.run_one_step()
-lmb1.run_one_step()
-fa1.run_one_step()
-fa2.run_one_step()
-gdp.run_with_adaptive_time_step_solver(dt_gw)
 
 #%% run forward
 
 
 for i in tqdm(range(N)):
     z0 = z.copy()
-
-    # update limestone rock properties
-    D = calc_pore_diam_logistic(i*dt, t0, kt, D0, Df)
-    n = calc_porosity_logistic(i*dt, t0, kt, D0, Df, n0, nf)
-    ksat = calc_ksat(n,D)
-    f_cond = calc_increase_logistic(i*dt, t0, kt, conduit_frac_0, conduit_frac_f)
-    lith.update_rock_properties("porosity", 0, n)
-    lith.update_rock_properties("Ksat_node", 0, ksat)
-    lith.update_rock_properties("conduit_frac", 0, f_cond)
 
     # map new ksat to link
     ks[:] = map_value_at_max_node_to_link(mg, "water_table__elevation", "Ksat_node")
@@ -363,9 +318,9 @@ for i in tqdm(range(N)):
             #     df_out['first_wtdelta'].loc[i] = wt_delta
             wt_iter += 1
         df_out.loc[i, 'wt_iterations'] = wt_iter
-    else:
-        h[:] = 0.0
-        zwt[:] = zb
+    # else:
+    #     h[:] = np.zeros_like(h)
+    #     zwt[:] = zb
 
     # local runoff is sum of saturation and infiltration excess.
     # use surface_water__specific_discharge rather than average because we are going for steady-state (end of timestep)
@@ -377,21 +332,17 @@ for i in tqdm(range(N)):
         # first set discharge field to Horton+Dunne runoff rate. Convert units to m/yr. 
         # get flow directions and discharge on the topographic surface
         mg.at_node['water__unit_flux_in'][:] = q_local * 3600 * 24 * 365
-        dfr1._find_pits()
-        if dfr1._number_of_pits > 0:
-            lmb1.run_one_step()
         fa1.run_one_step()
-        Q1[:] = mg.at_node['surface_water__discharge']
+        Q1[:] = mg.at_node['surface_water__discharge'].copy()
     else:
-        Q1[:] = 0.0
+        Q1[:] = np.zeros_like(Q1)
 
     if (r_c > 0.0).any():
         # first set discharge equal to conduit recharge rate. Convert units to m/yr. 
         # get flow directions and discharge on the basement surface. Some of this is in the karst.
         mg.at_node['water__unit_flux_in'][:] = r_c * 3600 * 24 * 365
-        lmb2.run_one_step()
         fa2.run_one_step()
-        Q2[:] = mg.at_node['surface_water__discharge']
+        Q2[:] = mg.at_node['surface_water__discharge'].copy()
     else:
         Q2[:] = np.zeros_like(Q2)
 
@@ -415,15 +366,7 @@ for i in tqdm(range(N)):
     zk[:] = z-lith.z_top[0,:]
 
     # update lower aquifer boundary condition
-    zb[mg.core_nodes] = (zk - mg.at_node["weathered_thickness"])[mg.core_nodes] 
-
-    # update the definition of the karst surface
-    # zk[:] = z-lith.z_top[0,:]
-    # lith.z_top[0,:]
-
-    # update lower aquifer boundary condition
-    # zb[mg.core_nodes] = ((z - lith.z_bottom[1,:]) - mg.at_node["weathered_thickness"])[mg.core_nodes]
-    # lith.z_bottom[1,:]
+    zb[mg.core_nodes] = ((z - lith.z_bottom[1,:]) - mg.at_node["weathered_thickness"])[mg.core_nodes]
 
     # something to handle the aquifer itself - see regolith models in DupuitLEM
     # this should cover it, but again check boundary conditions
@@ -432,23 +375,20 @@ for i in tqdm(range(N)):
 
     ######## Save output
 
-    # # save change metrics
+    # save change metrics
     df_out.loc[i,'limestone_exposed__area'] = np.sum(mg.at_node['rock_type__id'][mg.core_nodes]==0)/len(mg.core_nodes)
-    # df_out.loc[i,'mean_limestone__thickness'] = np.mean(lith.z_bottom[1,:][mg.at_node['rock_type__id']==0])
+    df_out.loc[i,'mean_limestone__thickness'] = np.mean(lith.z_bottom[1,:][mg.at_node['rock_type__id']==0])
     df_out.loc[i,'mean_limestone__elevation'] = np.mean(z[mg.at_node['rock_type__id']==0])
     df_out.loc[i,'mean__elevation'] = np.mean(z[mg.core_nodes])
     df_out.loc[i,'max__elevation'] = np.max(z[mg.core_nodes])
     df_out.loc[i,'denudation__rate'] = -np.mean((z - z0 - U*dt)[mg.core_nodes])
     df_out.loc[i,'median_aquifer_thickness'] = np.median(h[mg.core_nodes])
-    # at, ab = get_lower_upper_area(mg, bottom_nodes, top_nodes)
-    # df_out.loc[i,'area_lower'] = ab
-    # df_out.loc[i,'area_upper'] = at
-    # Qt, Qb = get_lower_upper_water_flux(mg, bottom_nodes, top_nodes)
-    # df_out.loc[i,'discharge_lower'] = Qb
-    # df_out.loc[i,'discharge_upper'] = Qt
-    df_out.loc[i,'ksat_limestone'] = ksat
-    df_out.loc[i,'n_limestone'] = n
-    df_out.loc[i,'conduit_frac'] = f_cond
+    at, ab = get_lower_upper_area(mg, bottom_nodes, top_nodes)
+    df_out.loc[i,'area_lower'] = ab
+    df_out.loc[i,'area_upper'] = at
+    Qt, Qb = get_lower_upper_water_flux(mg, bottom_nodes, top_nodes)
+    df_out.loc[i,'discharge_lower'] = Qb
+    df_out.loc[i,'discharge_upper'] = Qt
     df_out.loc[i,'mean_ie'] = np.mean(q_ie[mg.core_nodes])
     df_out.loc[i,'mean_r_conduit'] = np.mean(r_c[mg.core_nodes])
     df_out.loc[i,'mean_r_matrix'] = np.mean(r_m[mg.core_nodes])
@@ -458,11 +398,11 @@ for i in tqdm(range(N)):
             ds[of][i//save_freq, :, :] = mg["node"][of].reshape(mg.shape)
 
 
-ds.to_netcdf(os.path.join(save_directory, f"{filename}.nc"))
+ds.to_netcdf(os.path.join(save_directory, filename, f"{filename}.nc"))
 
 df_out['time'] = np.arange(0, N*dt, dt)
 df_out.set_index('time', inplace=True)
-df_out.to_csv(os.path.join(save_directory, f"output_{filename}.csv"))
+df_out.to_csv(os.path.join(save_directory, filename, f"output_{filename}.csv"))
 
 
 # %% plot topographic change
@@ -470,15 +410,15 @@ df_out.to_csv(os.path.join(save_directory, f"output_{filename}.csv"))
 # topography
 plt.figure()
 mg.imshow("topographic__elevation", colorbar_label='Elevation [m]')
-plt.savefig(os.path.join(save_directory,f"{filename}_elevation.png"))
+plt.savefig(os.path.join(save_directory, filename, f"{filename}_elevation.png"))
 
 plt.figure()
 mg.imshow("rock_type__id", cmap="viridis", colorbar_label='Rock ID')
-plt.savefig(os.path.join(save_directory,f"{filename}_rockid.png"))
+plt.savefig(os.path.join(save_directory, filename, f"{filename}_rockid.png"))
 
 plt.figure()
 mg.imshow('total_discharge', cmap="plasma", colorbar_label='Discharge')
-plt.savefig(os.path.join(save_directory,f"{filename}_totalQ.png"))
+plt.savefig(os.path.join(save_directory, filename, f"{filename}_totalQ.png"))
 
 
 # %%

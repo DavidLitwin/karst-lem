@@ -31,8 +31,9 @@ from landlab.grid.mappers import map_value_at_max_node_to_link
 
 from virtual_karst_funcs import *
 
-save_directory = '/Users/dlitwin/Documents/Research/Karst-landscape-evolution/landlab_virtual_karst/virtual_karst_surface_gw/'
-filename = "virtual_karst_surface_gw_test"
+save_directory = '/Users/dlitwin/Documents/Research Data/Local/karst_lem'
+filename = "virtual_karst_conduit_gw_1"
+os.mkdir(os.path.join(save_directory,filename))
 
 #%% parameters
 
@@ -48,24 +49,16 @@ b_limestone = 30 # limestone unit thickness (m)
 b_basement = 1000 # basement thickness (m)
 bed_dip = 0.0 #0.002 # dip of bed (positive = toward bottom boundary)
 
-D0 = 2e-5 # initial eq diameter (m) # D=1e-4 and n=0.005 give ksat=1.5e-5 similar to sauter (1992) Fissured limestone
-Df = 1e-4 # final eq diameter (m)
-n0 = 0.002 # initial porosity (-)
-nf = 0.01 # final porosity (-)
-conduit_frac_0 = 0.0 # fraction of recharge that goes to the conduit system versus the matrix
-conduit_frac_f = 0.5 # fraction of recharge that goes to the conduit system versus the matrix
-t0 = 5e5 #1.25e6 # midpoint of logistic (yr)
-kt = 2e-5 #1/1e5 # sharpness of logistic (1/yr)
-
-ksat_limestone = calc_ksat(n0, D0) # ksat limestone (m/s)
+ksat_limestone = 1.5e-5 # ksat limestone (m/s) ksat=1.5e-5 similar to sauter (1992) Fissured limestone
 ksat_basement = 1e-6 # ksat basement (m/s) # 1e-7: fine grained sedimentary (Gleeson)
-n_limestone = n0 # drainable porosity 
-conduit_frac = conduit_frac_0 # initial fraction of recharge going to conduits
+n_limestone = 0.002 # drainable porosity 
+conduit_frac = 0.5 # initial fraction of recharge going to conduits
 n_weathered_basement = 0.005 # drainable porosity 
 b_weathered_basement = 0.5 # thickness of regolith that can host aquifer in basement (m)
 
 r_tot = 1 / (3600 * 24 * 365) # total runoff m/s
 ibar = 1e-3 / 3600 # mean storm intensity (m/s) equiv. 1 mm/hr 
+# ie_frac = 0.0 # fraction of r_tot that becomes overland flow on limestone. ie_frac on basement=1. 
 
 wt_delta_tol = 1e-6 # acceptable rate of water table change before moving on (m/s)
 dt_gw = 1 * 24 * 3600 # groundwater timestep (s)
@@ -236,9 +229,6 @@ save_vals = ['limestone_exposed__area',
             'limestone_upper',
             'limestone_lower',
             'wt_iterations',
-            'ksat_limestone',
-            'n_limestone',
-            'conduit_frac',
             'mean_ie',
             'mean_r_conduit',
             'mean_r_matrix',
@@ -246,8 +236,7 @@ save_vals = ['limestone_exposed__area',
 df_out = pd.DataFrame(np.zeros((N,len(save_vals))), columns=save_vals)
 params = {'U':U, 'K':K_sp, 'D_ld':D_ld, 'm_sp':m_sp,
             'E_limestone': E_limestone, 'E_weathered_basement':E_weathered_basement,
-            'n_sp':n_sp, 'D0':D0, 'Df':Df, 'n0':n0, 'nf':nf, 'conduit_frac_0':conduit_frac_0,
-            'conduit_frac_f':conduit_frac_f, 't0':t0, 'kt':kt, 
+            'n_sp':n_sp, 'conduit_frac':conduit_frac,
             'b_limestone':b_limestone, 'b_basement':b_basement, 'bed_dip':bed_dip,
             'ksat_limestone':ksat_limestone, 'ksat_basement':ksat_basement, 
             'n_limestone':n_limestone,'n_weathered_basement':n_weathered_basement,
@@ -255,7 +244,7 @@ params = {'U':U, 'K':K_sp, 'D_ld':D_ld, 'm_sp':m_sp,
             'r_tot':r_tot, 'ibar':ibar, 
             'wt_delta_tol':wt_delta_tol, 'T':T, 'N':N, 'dt':dt, 'dt_gw':dt_gw, 'save_freq':save_freq}
 df_params = pd.DataFrame(params, index=[0])
-df_params.to_csv(os.path.join(save_directory, f"params_{filename}.csv"))
+df_params.to_csv(os.path.join(save_directory, filename, f"params_{filename}.csv"))
 
 
 ds = xr.Dataset(
@@ -322,15 +311,6 @@ ds = ds.assign_attrs(params)
 
 for i in tqdm(range(N)):
     z0 = z.copy()
-
-    # update limestone rock properties
-    D = calc_pore_diam_logistic(i*dt, t0, kt, D0, Df)
-    n = calc_porosity_logistic(i*dt, t0, kt, D0, Df, n0, nf)
-    ksat = calc_ksat(n,D)
-    f_cond = calc_increase_logistic(i*dt, t0, kt, conduit_frac_0, conduit_frac_f)
-    lith.update_rock_properties("porosity", 0, n)
-    lith.update_rock_properties("Ksat_node", 0, ksat)
-    lith.update_rock_properties("conduit_frac", 0, f_cond)
 
     # map new ksat to link
     ks[:] = map_value_at_max_node_to_link(mg, "water_table__elevation", "Ksat_node")
@@ -427,9 +407,6 @@ for i in tqdm(range(N)):
     # Qt, Qb = get_lower_upper_water_flux(mg, bottom_nodes, top_nodes)
     # df_out.loc[i,'discharge_lower'] = Qb
     # df_out.loc[i,'discharge_upper'] = Qt
-    df_out.loc[i,'ksat_limestone'] = ksat
-    df_out.loc[i,'n_limestone'] = n
-    df_out.loc[i,'conduit_frac'] = f_cond
     df_out.loc[i,'mean_ie'] = np.mean(q_ie[mg.core_nodes])
     df_out.loc[i,'mean_r_conduit'] = np.mean(r_c[mg.core_nodes])
     df_out.loc[i,'mean_r_matrix'] = np.mean(r_m[mg.core_nodes])
@@ -439,11 +416,11 @@ for i in tqdm(range(N)):
             ds[of][i//save_freq, :, :] = mg["node"][of].reshape(mg.shape)
 
 
-ds.to_netcdf(os.path.join(save_directory, f"{filename}.nc"))
+ds.to_netcdf(os.path.join(save_directory, filename, f"{filename}.nc"))
 
 df_out['time'] = np.arange(0, N*dt, dt)
 df_out.set_index('time', inplace=True)
-df_out.to_csv(os.path.join(save_directory, f"output_{filename}.csv"))
+df_out.to_csv(os.path.join(save_directory, filename, f"output_{filename}.csv"))
 
 
 # %% plot topographic change
@@ -451,15 +428,15 @@ df_out.to_csv(os.path.join(save_directory, f"output_{filename}.csv"))
 # topography
 plt.figure()
 mg.imshow("topographic__elevation", colorbar_label='Elevation [m]')
-plt.savefig(os.path.join(save_directory,f"{filename}_elevation.png"))
+plt.savefig(os.path.join(save_directory, filename, f"{filename}_elevation.png"))
 
 plt.figure()
 mg.imshow("rock_type__id", cmap="viridis", colorbar_label='Rock ID')
-plt.savefig(os.path.join(save_directory,f"{filename}_rockid.png"))
+plt.savefig(os.path.join(save_directory, filename, f"{filename}_rockid.png"))
 
 plt.figure()
 mg.imshow('total_discharge', cmap="plasma", colorbar_label='Discharge')
-plt.savefig(os.path.join(save_directory,f"{filename}_totalQ.png"))
+plt.savefig(os.path.join(save_directory, filename, f"{filename}_totalQ.png"))
 
 
 # %%

@@ -1,3 +1,9 @@
+"""
+No uplift, fluvial erosion with fastscape and nonlinear hillslope diffusion
+
+Attempt at seepage erosion (remove and replace)
+"""
+
 
 #%%
 import os

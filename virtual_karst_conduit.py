@@ -27,8 +27,9 @@ from landlab.components import (
 
 from virtual_karst_funcs import *
 
-save_directory = '/Users/dlitwin/Documents/Research/Karst-landscape-evolution/landlab_virtual_karst/'
-filename = "virtual_karst_surface_6"
+save_directory = '/Users/dlitwin/Documents/Research Data/Local/karst_lem'
+filename = "virtual_karst_conduit_1"
+os.mkdir(os.path.join(save_directory,filename))
 
 #%% parameters
 
@@ -291,7 +292,7 @@ for i in tqdm(range(N)):
             ds[of][i//save_freq, :, :] = mg["node"][of].reshape(mg.shape)
 
 
-ds.to_netcdf(os.path.join(save_directory,'virtual_karst_surface',f"{filename}.nc"))
+ds.to_netcdf(os.path.join(save_directory, filename, 'virtual_karst_surface',f"{filename}.nc"))
 
 
 # %% plot topographic change
@@ -299,15 +300,15 @@ ds.to_netcdf(os.path.join(save_directory,'virtual_karst_surface',f"{filename}.nc
 # topography
 plt.figure()
 mg.imshow("topographic__elevation", colorbar_label='Elevation [m]')
-plt.savefig(os.path.join(save_directory,'virtual_karst_surface', f"{filename}_elevation.png"))
+plt.savefig(os.path.join(save_directory, filename, f"{filename}_elevation.png"))
 
 plt.figure()
 mg.imshow("rock_type__id", cmap="viridis", colorbar_label='Rock ID')
-plt.savefig(os.path.join(save_directory,'virtual_karst_surface', f"{filename}_rockid.png"))
+plt.savefig(os.path.join(save_directory, filename, f"{filename}_rockid.png"))
 
 plt.figure()
 mg.imshow('total_discharge', cmap="plasma", colorbar_label='Discharge')
-plt.savefig(os.path.join(save_directory,'virtual_karst_surface', f"{filename}_totalQ.png"))
+plt.savefig(os.path.join(save_directory, filename, f"{filename}_totalQ.png"))
 
 
 # %%

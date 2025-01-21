@@ -1,4 +1,7 @@
+"""
+No uplift, fluvial erosion with space and nonlinear hillslope diffusion
 
+"""
 #%%
 import os
 import numpy as np
