@@ -28,12 +28,11 @@ from landlab.components import (
     GroundwaterDupuitPercolator,
 )
 from landlab.grid.mappers import map_value_at_max_node_to_link
-
-from virtual_karst_funcs import *
+# from virtual_karst_funcs import *
 
 save_directory = '/Users/dlitwin/Documents/Research Data/Local/karst_lem'
 filename = "virtual_karst_conduit_gw_1"
-os.mkdir(os.path.join(save_directory,filename))
+# os.mkdir(os.path.join(save_directory,filename))
 
 #%% parameters
 
@@ -246,9 +245,6 @@ params = {'U':U, 'K_limestone':K_sp_limestone, 'K_basement':K_sp_basement, 'D_ld
             'b_weathered_basement':b_weathered_basement, 
             'r_tot':r_tot, 'ibar':ibar, 
             'wt_delta_tol':wt_delta_tol, 'T':T, 'N':N, 'dt':dt, 'dt_gw':dt_gw, 'save_freq':save_freq}
-df_params = pd.DataFrame(params, index=[0])
-df_params.to_csv(os.path.join(save_directory, filename, f"params_{filename}.csv"))
-
 
 ds = xr.Dataset(
     data_vars={

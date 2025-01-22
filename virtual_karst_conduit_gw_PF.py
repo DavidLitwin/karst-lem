@@ -35,7 +35,7 @@ from virtual_karst_funcs import *
 
 save_directory = '/Users/dlitwin/Documents/Research Data/Local/karst_lem'
 filename = "virtual_karst_conduit_gw_PF_1"
-os.mkdir(os.path.join(save_directory,filename))
+# os.mkdir(os.path.join(save_directory,filename))
 
 #%% parameters
 
@@ -228,8 +228,6 @@ params = {'U':U, 'K':K_sp, 'D_ld':D_ld, 'm_sp':m_sp,
             'b_weathered_basement':b_weathered_basement, 
             'r_tot':r_tot, 'ibar':ibar, 
             'wt_delta_tol':wt_delta_tol, 'T':T, 'N':N, 'dt':dt, 'dt_gw':dt_gw, 'save_freq':save_freq}
-df_params = pd.DataFrame(params, index=[0])
-df_params.to_csv(os.path.join(save_directory, filename, f"params_{filename}.csv"))
 
 
 ds = xr.Dataset(

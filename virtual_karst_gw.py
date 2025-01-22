@@ -1,12 +1,9 @@
 """
-More complex test of virtual karst in landlab. Use the Lithology component to 
-track two layers: a limestone layer, and a basement. Now use the thicknesses and
-permeabilities of those lithologies to parametrize a GroundwaterDupuitPercolator
-model.
+Use the Lithology component to track two layers: a limestone layer, and a basement. 
+Precipitation partitioned between infiltration excess and recharge. Fraction
+depends on whether on limestone or basement. Recharge to GroundwaterDupuitPercolator, 
+with different hydraulic properties.
 
-Experiment with some partial partitioning - may need to allow some amount of 
-surface runoff in order to get incision to begin with. Part of the challenge here
-is that karst will change conductivity with age, which we are not capturing yet.
 """
 
 #%%
@@ -14,9 +11,8 @@ is that karst will change conductivity with age, which we are not capturing yet.
 import os
 import numpy as np
 import pandas as pd
-
+import xarray as xr
 import matplotlib.pyplot as plt
-from matplotlib.colors import LightSource
 
 from landlab import RasterModelGrid
 from landlab.components import (
@@ -29,90 +25,94 @@ from landlab.components import (
     GroundwaterDupuitPercolator,
 )
 from landlab.grid.mappers import map_value_at_max_node_to_link
-from landlab.io.netcdf import to_netcdf
-from virtual_karst_funcs import *
+# from virtual_karst_funcs import *
 
-fig_directory = '/Users/dlitwin/Documents/Research/Karst landscape evolution/landlab_virtual_karst/figures'
 save_directory = '/Users/dlitwin/Documents/Research Data/Local/karst_lem'
-id = "flat_low_recharge_1"
+filename = "virtual_karst_gw_1"
+# os.mkdir(os.path.join(save_directory,filename))
 
 #%% parameters
 
-U = 1e-4 # uplift m/yr
-K = 1e-5 # streampower incision (yr^...)
-D = 1e-3 # diffusivity (m2/yr)
+U = 1e-4 # uplift (m/yr)
+E_limestone = 0.0 #5e-5 # limestone surface chemical denudation rate (m/yr)
+E_weathered_basement = 0.0 # weathered basement surface chemical denudation rate (m/yr)
+K_sp_limestone = 1e-5 # streampower incision (yr^...)
+K_sp_basement = 1e-5 # streampower incision (yr^...)
+m_sp = 0.5 # exponent on discharge
+n_sp = 1.0 # exponent on slope
+D_ld = 1e-3 # diffusivity (m2/yr)
 
-b_limestone = 20 # limestone unit thickness (m)
+b_limestone = 25 # limestone unit thickness (m)
 b_basement = 1000 # basement thickness (m)
-bed_dip = 0.000 #0.002 # dip of bed (positive = toward bottom boundary)
-ksat_limestone = 1e-5 # ksat limestone (m/s)
-ksat_basement = 1e-6 # ksat basement (m/s)
-n_limestone = 0.1 # drainable porosity 
-n_weathered_basement = 0.1 # drainable porosity 
+bed_dip = 0.0 #0.002 # dip of bed (positive = toward bottom boundary)
+
+ksat_limestone = 1.5e-5 # ksat limestone (m/s) ksat=1.5e-5 similar to sauter (1992) Fissured limestone
+ksat_basement = 1e-6 # ksat basement (m/s) # 1e-7: fine grained sedimentary (Gleeson)
+n_limestone = 0.002 # drainable porosity 
+n_weathered_basement = 0.005 # drainable porosity 
 b_weathered_basement = 0.5 # thickness of regolith that can host aquifer in basement (m)
 
 r_tot = 1 / (3600 * 24 * 365) # total runoff m/s
-ie_frac = 0.9
-ie_rate = r_tot * ie_frac # infiltration excess average rate (m/s)
-recharge_rate = r_tot * (1 - ie_frac) # recharge rate (m/s)
+# ibar = 1e-3 / 3600 # mean storm intensity (m/s) equiv. 1 mm/hr 
+ie_frac = 0.1 # fraction of r_tot that becomes overland flow on limestone. ie_frac on basement=1. 
 
-N = 5000 # number of geomorphic timesteps
+wt_delta_tol = 1e-6 # acceptable rate of water table change before moving on (m/s)
+dt_gw = 1 * 24 * 3600 # groundwater timestep (s)
+
+T = 1e6 # total geomorphic time (yr)
 dt = 500 # geomorphic timestep (yr)
-dt_gw = 10 * 24 * 3600 # groundwater timestep (s)
-save_freq = 100 # steps between saving output
-output_fields = [
-        "at_node:topographic__elevation",
-        "at_node:aquifer_base__elevation",
-        "at_node:water_table__elevation",
-        "at_node:surface_water_discharge",
-        "at_node:local_runoff",
-        "at_node:rock_type__id"
-        ]
-save_vals = ['limestone_exposed', 
-               'mean_relief',
-               'max_relief', 
-               'median_aquifer_thickness', 
-               'discharge_lower', 
-               'discharge_upper',
-               'area_lower', 
-               'area_upper',
-               'first_wtdelta', 
-               'wt_iterations'
-               ]
+N = int(T//dt) # number of geomorphic timesteps
+
+Nx = 150
+Ny = 100
+dx = 50
+noise_scale = 0.1
+
+save_freq = 25 # steps between saving output
+Ns = N//save_freq
+
 
 #%% set up grid and lithology
 
-mg = RasterModelGrid((100,150), xy_spacing=50)
+mg = RasterModelGrid((Ny,Nx), xy_spacing=dx)
 mg.set_closed_boundaries_at_grid_edges(right_is_closed=True,
                                        left_is_closed=True,
                                        top_is_closed=False,
                                        bottom_is_closed=False)
-
 bottom_nodes = mg.nodes_at_bottom_edge
 top_nodes = mg.nodes_at_top_edge
 z = mg.add_zeros("node", "topographic__elevation")
 np.random.seed(10010)
-z += 0.1*np.random.rand(len(z))
+z += noise_scale*np.random.rand(len(z))
 
 # two layers, both with bottoms below ground. Top layer is limestone, bottom is basement.
-# weathered_thickness is a way to add some somewhat realistic weathered zone in the
-# basement that will host the aquifer there. In the limestone, the aquifer is just the whole unit.
 layer_elevations = [b_limestone,b_basement]
 layer_ids = [0,1]
-attrs = {"Ksat_node": {0: ksat_limestone, 1: ksat_basement}, 
-         "weathered_thickness": {0: 0.0, 1: b_weathered_basement},
-         "porosity": {0: n_limestone, 1: n_weathered_basement}
+attrs = {
+         "Ksat_node": {0: ksat_limestone, 1: ksat_basement}, 
+         "weathered_thickness": {0: b_weathered_basement, 1: b_weathered_basement}, # was 0.0 for limestone but this can lead to discontinuities.
+         "porosity": {0: n_limestone, 1: n_weathered_basement},
+         "chemical_denudation_rate": {0: E_limestone, 1: E_weathered_basement},
+         "erodibility":{0: K_sp_limestone, 1: K_sp_basement}
          }
 
 lith = LithoLayers(
-    mg, layer_elevations, layer_ids, function=lambda x, y: - bed_dip * y, attrs=attrs
+    mg, layer_elevations, layer_ids, function=lambda x, y: - bed_dip * y + noise_scale*np.random.rand(len(y)), 
+    attrs=attrs, layer_type='MaterialLayers',
 )
+dz_ad = np.zeros(mg.size("node"))
+dz_ad[mg.core_nodes] = U * dt
+# dz_ad[top_nodes] += 0.5 * U * dt # effectively decrease the baselevel fall rate of the upper boundary
 
-# we just start with aquifer base at the base of the limestone, because limestone
-# covers the whole surface
-rock_id = 1
+# the karst surface is the topographic elevation minus the depth to the top of the basement
+# as this evolves it continues to the top of the basement
+zk = mg.add_zeros("node", "karst__elevation")
+zk[:] = z-lith.z_top[0,:]
+
+# start with aquifer base at the base of the limestone, plus the small weathered thickness underlying 
+# limestone (used for continuity)
 zb = mg.add_zeros('node', 'aquifer_base__elevation')
-zb[:] = z - lith.z_bottom[rock_id,:]
+zb[:] = (z - lith.z_bottom[1,:]) - mg.at_node["weathered_thickness"]
 zwt = mg.add_zeros('node', 'water_table__elevation')
 zwt[mg.core_nodes] = z[mg.core_nodes] - 0.2
 
@@ -120,11 +120,21 @@ zwt[mg.core_nodes] = z[mg.core_nodes] - 0.2
 ks = mg.add_zeros("link", "Ksat")
 ks[:] = map_value_at_max_node_to_link(mg, "water_table__elevation", "Ksat_node")
 
+# infiltration excess and recharge fields
+# model rainfall rates as exponentially distributed with mean ibar
+# then the fraction of rainfall rates that falls at higher intensity
+# than the hydraulic conductivity (if isotropic, steady state infiltration, etc.)
+# becomes infiltration excess.
+q_ie = mg.add_zeros("node", "infiltration_excess")
+r_m = mg.add_zeros("node", "recharge_matrix")
+
 # add a local runoff field - both infiltration excess and saturation excess
 q_local = mg.add_zeros("node", "local_runoff")
 
-q_ie = mg.add_zeros("node", "infiltration_excess")
-q_ie[mg.core_nodes] = ie_rate
+# add a field for exfiltration -- derived from local gdp runoff
+qe_local = mg.add_zeros("node", "exfiltration_rate")
+
+h = mg.at_node['aquifer__thickness']
 
 #%%
 
@@ -133,7 +143,7 @@ gdp = GroundwaterDupuitPercolator(
     mg, 
     hydraulic_conductivity='Ksat',
     porosity="porosity",
-    recharge_rate=recharge_rate
+    recharge_rate="recharge_matrix"
 )
 fd = FlowDirectorD8(mg)
 fa = FlowAccumulator(
@@ -154,20 +164,106 @@ lmb = LakeMapperBarnes(
     ignore_overfill=True,
 )
 
-fs = FastscapeEroder(mg, K_sp=K, discharge_field='surface_water__discharge')
-ld = LinearDiffuser(mg, linear_diffusivity=D)
+fs = FastscapeEroder(mg, K_sp='erodibility', discharge_field='surface_water__discharge')
+ld = LinearDiffuser(mg, linear_diffusivity=D_ld)
 
 lmb.run_one_step()
 
+#%% xarray to save output
+
+output_fields = [
+    "topographic__elevation",
+    "karst__elevation",
+    "aquifer_base__elevation",
+    "water_table__elevation",
+    "rock_type__id",
+    "average_surface_water__specific_discharge",
+    "surface_water__discharge",
+]
+save_vals = ['limestone_exposed__area',
+            'mean_limestone__thickness',
+            'mean_limestone__elevation',
+            'max_limestone__elevation',
+            'mean__elevation',
+            'max__elevation',
+            'denudation__rate',
+            'median_aquifer_thickness',
+            'discharge_lower',
+            'discharge_upper',
+            'area_lower',
+            'area_upper',
+            'limestone_upper',
+            'limestone_lower',
+            'wt_iterations',
+            'mean_ie',
+            'mean_r_matrix',
+            ]
+df_out = pd.DataFrame(np.zeros((N,len(save_vals))), columns=save_vals)
+params = {'U':U, 'K_limestone':K_sp_limestone, 'K_basement':K_sp_basement, 'D_ld':D_ld, 'm_sp':m_sp,
+            'E_limestone': E_limestone, 'E_weathered_basement':E_weathered_basement,
+            'n_sp':n_sp,
+            'b_limestone':b_limestone, 'b_basement':b_basement, 'bed_dip':bed_dip,
+            'ksat_limestone':ksat_limestone, 'ksat_basement':ksat_basement, 
+            'n_limestone':n_limestone,'n_weathered_basement':n_weathered_basement,
+            'b_weathered_basement':b_weathered_basement, 
+            'r_tot':r_tot, 'ie_frac':ie_frac, #'ibar':ibar, 
+            'wt_delta_tol':wt_delta_tol, 'T':T, 'N':N, 'dt':dt, 'dt_gw':dt_gw, 'save_freq':save_freq}
+
+ds = xr.Dataset(
+    data_vars={
+        "topographic__elevation": (
+            ("time", "y", "x"),  # tuple of dimensions
+            np.empty((Ns, mg.shape[0], mg.shape[1])),
+            {"units": "meters", "long_name": "Topographic Elevation"},
+        ),
+        "karst__elevation": (
+            ("time", "y", "x"),
+            np.empty((Ns, mg.shape[0], mg.shape[1])),
+            {"units": "meters", "long_name": "Base of karst and top of basement"},
+        ),
+        "aquifer_base__elevation": (
+            ("time", "y", "x"),
+            np.empty((Ns, mg.shape[0], mg.shape[1])),
+            {"units": "meters", "long_name": "Base of aquifer for Dupuit model"},
+        ),
+        "water_table__elevation": (
+            ("time", "y", "x"),
+            np.empty((Ns, mg.shape[0], mg.shape[1])),
+            {"units": "meters", "long_name": "Elevation of water table"},
+        ),
+        "rock_type__id": (
+            ("time", "y", "x"),
+            np.empty((Ns, mg.shape[0], mg.shape[1])),
+            {"units": "-", "long_name": "Rock Type ID Code"},
+        ),
+        "average_surface_water__specific_discharge": (
+            ("time", "y", "x"),
+            np.empty((Ns, mg.shape[0], mg.shape[1])),
+            {"units": "m/s", "long_name": "Local saturation excess overland flow"},
+        ),
+        "surface_water__discharge": (
+            ("time", "y", "x"),
+            np.empty((Ns, mg.shape[0], mg.shape[1])),
+            {"units": "m3/s", "long_name": "Discharge on topographic surface"},
+        ),
+    },
+    coords={
+        "x": (
+            ("x"),  # tuple of dimensions
+            mg.x_of_node.reshape(mg.shape)[0, :],  # 1-d array of coordinate data
+            {"units": "meters"},
+        ),  # dictionary with data attributes
+        "y": (("y"), mg.y_of_node.reshape(mg.shape)[:, 1], {"units": "meters"}),
+        "time": (
+            ("time"),
+            dt * np.arange(Ns) / 1e3,
+            {"units": "thousands of years since model start", "standard_name": "time"},
+        ),
+    },
+)
+ds = ds.assign_attrs(params)
 
 #%% run forward
-
-dz_ad = np.zeros(mg.size("node"))
-dz_ad[mg.core_nodes] = U * dt
-# dz_ad[top_nodes] += 0.5 * U * dt # effectively decrease the baselevel fall rate of the upper boundary
-
-h = mg.at_node['aquifer__thickness']
-Ns = N//save_freq
 
 df_out = pd.DataFrame(np.zeros((N,len(save_vals))), columns=save_vals)
 bnds = mg.fixed_value_boundary_nodes
@@ -179,11 +275,11 @@ for i in range(N):
     # iterate for steady state water table
     wt_delta = 1
     wt_iter = 0
-    while wt_delta > 1e-4:
+    while wt_delta > wt_delta_tol:
 
         zwt0 = zwt.copy()
         gdp.run_with_adaptive_time_step_solver(dt_gw)
-        wt_delta = np.max(np.abs(zwt0 - zwt))/(dt_gw/3600)
+        wt_delta = np.max(np.abs(zwt0 - zwt))/dt_gw
 
         if wt_iter == 0:
             df_out['first_wtdelta'].loc[i] = wt_delta
@@ -202,7 +298,7 @@ for i in range(N):
     z += dz_ad
 
     # update lithologic model
-    lith.rock_id = 0
+    lith.rock_id = mg.at_node['rock_type__id'] # deposited material is the same as what was there before.
     lith.dz_advection = dz_ad
     lith.run_one_step()
 
@@ -213,143 +309,31 @@ for i in range(N):
     ks[:] = map_value_at_max_node_to_link(mg, "water_table__elevation", "Ksat_node")
 
     # update lower aquifer boundary condition
-    zb[mg.core_nodes] = ((z - lith.z_bottom[rock_id,:]) - mg.at_node["weathered_thickness"])[mg.core_nodes]
+    zb[mg.core_nodes] = ((z - lith.z_bottom[1,:]) - mg.at_node["weathered_thickness"])[mg.core_nodes]
     ## something to handle boundary nodes (because lith thickness there is not updated)
 
     # something to handle the aquifer itself - see regolith models in DupuitLEM
     # this should cover it, but again check boundary conditions
     h[mg.core_nodes] = (zwt - zb)[mg.core_nodes]
 
-    # metrics of change
-    df_out['limestone_exposed'].loc[i] = np.sum(mg.at_node['rock_type__id'][mg.core_nodes]==0)/len(mg.core_nodes)
-    df_out['mean_relief'].loc[i] = np.mean(z[mg.core_nodes])
-    df_out['max_relief'].loc[i] = np.max(z[mg.core_nodes])
-    df_out['median_aquifer_thickness'].loc[i] = np.median(h[mg.core_nodes])
-    at, ab = get_lower_upper_area(mg, bnds_lower, bnds_upper)
-    df_out['area_lower'].loc[i] = ab
-    df_out['area_upper'].loc[i] = at
-    Qt, Qb = get_lower_upper_water_flux(mg, bnds_lower, bnds_upper)
-    df_out['discharge_lower'].loc[i] = Qb
-    df_out['discharge_upper'].loc[i] = Qt
-
     # save output
     if i%save_freq==0:
-        print(f"Finished iteration {i}")
+        for of in output_fields:
+            ds[of][i//save_freq, :, :] = mg["node"][of].reshape(mg.shape)
 
-        # save the specified grid fields
-        filename = os.path.join(save_directory, id, f"{id}_grid_{i}.nc")
-        to_netcdf(mg, filename, include=output_fields, format="NETCDF4")
-
-#%% save out
-
-df_out['time'] = np.arange(0,N*dt,dt)
-df_out.set_index('time', inplace=True)
-df_out.to_csv(os.path.join(save_directory, id, f"{id}_output.csv"))
+ds.to_netcdf(os.path.join(save_directory, filename, f"{filename}.nc"))
 
 # %% plot topogrpahic change
 
 # topography
 plt.figure()
 mg.imshow("topographic__elevation", colorbar_label='Elevation [m]')
-plt.savefig(os.path.join(save_directory, id, "elevation.png"))
+plt.savefig(os.path.join(save_directory, filename, f"{filename}_elevation.png"))
 
 plt.figure()
 mg.imshow("rock_type__id", cmap="viridis", colorbar_label='Rock ID')
-plt.savefig(os.path.join(save_directory, id, "rock_id.png"))
-
-Q_an = mg.at_node['surface_water__discharge']/mg.at_node['drainage_area']
-plt.figure()
-mg.imshow('surface_water__discharge', cmap="Blues", colorbar_label='Discharge')
-plt.savefig(os.path.join(save_directory, id, "lith_gdp_discharge.png"))
-
-
-
-#%%
-
-# field = mg.at_node["aquifer__thickness"] / (z-zb)
-# field = z-zb
-# field = mg.at_node["aquifer__thickness"]
-# field = mg.at_node["average_surface_water__specific_discharge"]
-# plt.figure()
-# mg.imshow(field, cmap="Blues", colorbar_label='thickness') #, vmin=0, vmax=1
-# mg.imshow('water_table__elevation', cmap="plasma", colorbar_label='WT Elevation')
-
-
-#%%
-# hillshade
-
-elev = mg.at_node['topographic__elevation'].copy()
-elev[mg.boundary_nodes] = np.nan
-y = np.arange(mg.shape[0] + 1) * mg.dx - mg.dx * 0.5
-x = np.arange(mg.shape[1] + 1) * mg.dy - mg.dy * 0.5
-
-elev_plot = elev.reshape(mg.shape)
-elev_profile = np.nanmean(elev_plot, axis=1)
-
-f, (ax0, ax1) = plt.subplots(1, 2, width_ratios=[4, 1], figsize=(10,5))
-ls = LightSource(azdeg=135, altdeg=45)
-ax0.imshow(
-        ls.hillshade(elev_plot, 
-            vert_exag=1, 
-            dx=mg.dx, 
-            dy=mg.dy), 
-        origin="lower", 
-        extent=(x[0], x[-1], y[0], y[-1]), 
-        cmap='gray',
-        )
-for i in range(mg.shape[1]):
-    ax1.plot(elev_plot[:,i], y[0:-1], alpha=0.1, color='k')
-ax1.plot(elev_profile, y[0:-1], linewidth=2, color='r')
-
-ax0.set_xlabel('X [m]')
-ax0.set_ylabel('Y [m]')
-ax1.set_xlabel('Z [m]')
-f.tight_layout()
-plt.savefig(os.path.join(save_directory, id, "hillshade.png"))
-# %%
-
-
-# df_out.plot()
-# %%
-
-fig, ax = plt.subplots()
-ax.plot(df_out['discharge_upper'], 'r', label='Qupper')
-ax.plot(df_out['discharge_lower'], 'r--', label='Qlower')
-ax.set_ylabel("Discharge (m3/yr)", color='r')
-ax1 = ax.twinx()
-ax1.plot(df_out['area_upper'], 'b', label='Aupper')
-ax1.plot(df_out['area_lower'], 'b--', label='Alower')
-ax1.set_ylabel('Area (m2)', color='b')
-ax.legend(loc='upper right')
-ax1.legend(loc='lower right')
-plt.savefig(os.path.join(save_directory, id, "area_discharge.png"))
-
-# %%
+plt.savefig(os.path.join(save_directory, filename, f"{filename}_rockid.png"))
 
 plt.figure()
-plt.plot(df_out['mean_relief'], color='r', label='Mean relief')
-plt.plot(df_out['max_relief'], color='g', label='Max relief')
-plt.xlabel('Time (yr)')
-plt.ylabel('Relief (m)')
-plt.legend()
-plt.savefig(os.path.join(save_directory, id, "relief.png"))
-
-#%%
-
-plt.figure()
-plt.plot(df_out['limestone_exposed'])
-plt.ylim((0.01,1.1))
-plt.ylabel('Limestone exposed (-)')
-plt.xlabel('Time (yr)')
-plt.savefig(os.path.join(save_directory, id, "exposed_limestone.png"))
-
-# %%
-
-# mask = get_divide_mask(mg, bnds_lower)
-# rid = (mg.at_node['rock_type__id'] == 0)*1
-# plt.figure()
-# mg.imshow(z)
-# mg.imshow(rid, alpha=0.5, cmap='Blues')
-
-
-# %%
+mg.imshow('surface_water__discharge', cmap="plasma", colorbar_label='Discharge')
+plt.savefig(os.path.join(save_directory, filename, f"{filename}_totalQ.png"))
