@@ -25,28 +25,29 @@ from landlab.components import (
     LithoLayers,
 )
 
-from virtual_karst_funcs import *
+# from virtual_karst_funcs import *
 
 save_directory = '/Users/dlitwin/Documents/Research Data/Local/karst_lem'
 filename = "virtual_karst_conduit_1"
-os.mkdir(os.path.join(save_directory,filename))
+# os.mkdir(os.path.join(save_directory,filename))
 
 #%% parameters
 
 U = 1e-4 # uplift (m/yr)
 E_limestone = 0.0 #5e-5 # limestone surface chemical denudation rate (m/yr)
 E_weathered_basement = 0.0 # weathered basement surface chemical denudation rate (m/yr)
-K_sp = 1e-5 # streampower incision (yr^...)
+K_sp_limestone = 1e-5 # streampower incision (yr^...)
+K_sp_basement = 1e-5 # streampower incision (yr^...)
 m_sp = 0.5 # exponent on discharge
 n_sp = 1.0 # exponent on slope
 D_ld = 1e-3 # diffusivity (m2/yr)
 
-b_limestone = 50 # limestone unit thickness (m)
+b_limestone = 25 # limestone unit thickness (m)
 b_basement = 1000 # basement thickness (m)
-bed_dip = 0.0001 #0.002 # dip of bed (positive = toward bottom boundary)
+bed_dip = 0.000 #0.002 # dip of bed (positive = toward bottom boundary)
 
 r_tot = 1.0 #/ (3600 * 24 * 365) # total runoff m/yr
-ie_frac = 0.0 # fraction of r_tot that becomes overland flow on limestone. ie_frac on basement=1. 
+ie_frac = 0.5 # fraction of r_tot that becomes overland flow on limestone. ie_frac on basement=1. 
 # ibar = 1e-3 / 3600 # mean storm intensity (m/s) equiv. 1 mm/hr 
 
 T = 2e6 # total geomorphic time
@@ -80,7 +81,8 @@ layer_elevations = [b_limestone,b_basement]
 layer_ids = [0,1]
 attrs = {
          "ie_frac": {0: ie_frac, 1: 1}, # fraction of r_tot that becomes infiltration excess runoff
-         "chemical_denudation_rate": {0: E_limestone, 1: E_weathered_basement}
+         "chemical_denudation_rate": {0: E_limestone, 1: E_weathered_basement},
+         "erodibility":{0: K_sp_limestone, 1: K_sp_basement}
          }
 
 lith = LithoLayers(
@@ -155,7 +157,7 @@ lmb2 = LakeMapperBarnes(
     ignore_overfill=True,
 )
 
-fs2 = FastscapeEroder(mg, K_sp=K_sp, m_sp=m_sp, n_sp=n_sp, discharge_field='total_discharge')
+fs2 = FastscapeEroder(mg, K_sp='erodibility', m_sp=m_sp, n_sp=n_sp, discharge_field='total_discharge')
 ld2 = LinearDiffuser(mg, linear_diffusivity=D_ld)
 
 #%% xarray to save output
@@ -180,7 +182,8 @@ save_vals = ['limestone_exposed__area',
             'erosion__rate',
             ]
 df_out = pd.DataFrame(np.zeros((N,len(save_vals))), columns=save_vals)
-params = {'U':U, 'K':K_sp, 'D_ld':D_ld, 'm_sp':m_sp,'n_sp':n_sp, 
+params = {'U':U, 'K_limestone':K_sp_limestone, 'K_basement':K_sp_basement, 
+        'D_ld':D_ld, 'm_sp':m_sp,'n_sp':n_sp, 
         'E_limestone': E_limestone, 'E_weathered_basement':E_weathered_basement,
         'b_limestone':b_limestone, 'b_basement':b_basement, 'bed_dip':bed_dip,
         'r_tot':r_tot, 'ie_frac':ie_frac, 
@@ -228,7 +231,7 @@ ds = xr.Dataset(
         "y": (("y"), mg.y_of_node.reshape(mg.shape)[:, 1], {"units": "meters"}),
         "time": (
             ("time"),
-            dt * np.arange(Ns) / 1e3,
+            dt * save_freq * np.arange(Ns) / 1e3,
             {"units": "thousands of years since model start", "standard_name": "time"},
         ),
     },
@@ -250,9 +253,9 @@ for i in tqdm(range(N)):
         mg.at_node['water__unit_flux_in'][:] = q_ie
         lmb1.run_one_step()
         fa1.run_one_step()
-        Q1[:] = mg.at_node['surface_water__discharge'].copy()
+        Q1[:] = mg.at_node['surface_water__discharge']
     else:
-        Q1[:] = np.zeros_like(Q1)
+        Q1[:] = 0.0
 
 
     if (r > 0.0).any():
@@ -261,9 +264,9 @@ for i in tqdm(range(N)):
         mg.at_node['water__unit_flux_in'][:] = r
         lmb2.run_one_step()
         fa2.run_one_step()
-        Q2[:] = mg.at_node['surface_water__discharge'].copy()
+        Q2[:] = mg.at_node['surface_water__discharge']
     else:
-        Q2[:] = np.zeros_like(Q2)
+        Q2[:] = 0.0
 
     # add conditionally to get total surface water discharge
     Q2_masked = np.zeros_like(Q2)
@@ -293,7 +296,7 @@ for i in tqdm(range(N)):
             ds[of][i//save_freq, :, :] = mg["node"][of].reshape(mg.shape)
 
 
-ds.to_netcdf(os.path.join(save_directory, filename, 'virtual_karst_surface',f"{filename}.nc"))
+ds.to_netcdf(os.path.join(save_directory, filename, f"{filename}.nc"))
 
 
 # %% plot topographic change

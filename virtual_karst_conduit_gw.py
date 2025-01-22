@@ -40,12 +40,13 @@ os.mkdir(os.path.join(save_directory,filename))
 U = 1e-4 # uplift (m/yr)
 E_limestone = 0.0 #5e-5 # limestone surface chemical denudation rate (m/yr)
 E_weathered_basement = 0.0 # weathered basement surface chemical denudation rate (m/yr)
-K_sp = 1e-5 # streampower incision (yr^...)
+K_sp_limestone = 1e-5 # streampower incision (yr^...)
+K_sp_basement = 1e-5 # streampower incision (yr^...)
 m_sp = 0.5 # exponent on discharge
 n_sp = 1.0 # exponent on slope
 D_ld = 1e-3 # diffusivity (m2/yr)
 
-b_limestone = 30 # limestone unit thickness (m)
+b_limestone = 25 # limestone unit thickness (m)
 b_basement = 1000 # basement thickness (m)
 bed_dip = 0.0 #0.002 # dip of bed (positive = toward bottom boundary)
 
@@ -97,7 +98,8 @@ attrs = {
          "weathered_thickness": {0: b_weathered_basement, 1: b_weathered_basement}, # was 0.0 for limestone but this can lead to discontinuities.
          "porosity": {0: n_limestone, 1: n_weathered_basement},
          "conduit_frac": {0: conduit_frac, 1: 0.0},
-         "chemical_denudation_rate": {0: E_limestone, 1: E_weathered_basement}
+         "chemical_denudation_rate": {0: E_limestone, 1: E_weathered_basement},
+         "erodibility":{0: K_sp_limestone, 1: K_sp_basement}
          }
 
 lith = LithoLayers(
@@ -200,7 +202,7 @@ lmb2 = LakeMapperBarnes(
 )
 
 # erosion components
-fs2 = FastscapeEroder(mg, K_sp=K_sp, m_sp=m_sp, n_sp=n_sp, discharge_field='total_discharge')
+fs2 = FastscapeEroder(mg,  K_sp='erodibility', m_sp=m_sp, n_sp=n_sp, discharge_field='total_discharge')
 ld2 = LinearDiffuser(mg, linear_diffusivity=D_ld)
 
 #%% xarray to save output
@@ -235,7 +237,7 @@ save_vals = ['limestone_exposed__area',
             'mean_r_matrix',
             ]
 df_out = pd.DataFrame(np.zeros((N,len(save_vals))), columns=save_vals)
-params = {'U':U, 'K':K_sp, 'D_ld':D_ld, 'm_sp':m_sp,
+params = {'U':U, 'K_limestone':K_sp_limestone, 'K_basement':K_sp_basement, 'D_ld':D_ld, 'm_sp':m_sp,
             'E_limestone': E_limestone, 'E_weathered_basement':E_weathered_basement,
             'n_sp':n_sp, 'conduit_frac':conduit_frac,
             'b_limestone':b_limestone, 'b_basement':b_basement, 'bed_dip':bed_dip,
@@ -300,7 +302,7 @@ ds = xr.Dataset(
         "y": (("y"), mg.y_of_node.reshape(mg.shape)[:, 1], {"units": "meters"}),
         "time": (
             ("time"),
-            dt * np.arange(Ns) / 1e3,
+            dt * save_freq * np.arange(Ns) / 1e3,
             {"units": "thousands of years since model start", "standard_name": "time"},
         ),
     },

@@ -14,7 +14,8 @@ from scipy import ndimage
 
 fig_directory = '/Users/dlitwin/Documents/Research/Karst landscape evolution/landlab_virtual_karst/figures'
 save_directory = '/Users/dlitwin/Documents/Research Data/Local/karst_lem'
-id = "virtual_karst_null_2"
+# id = "virtual_karst_null_6"
+id = 'virtual_karst_conduit_2'
 
 #%%
 
@@ -27,12 +28,13 @@ rid = fp.variables['rock_type__id'][:,:,:].data
 
 #%%
 
-fracs = [0.9, 0.5, 0.1]
-id_ts = [np.argmin(np.absolute(frac_limestone-i)) for i in fracs]
-
 t = fp['time'][:].data
 max_elev = np.max(elev[:,1:-1,1:-1], axis=(1,2))
 frac_limestone = 1 - np.mean(rid[:,1:-1,1:-1], axis=(1,2))
+
+fracs = [0.9, 0.5, 0.1]
+id_ts = [np.argmin(np.absolute(frac_limestone-i)) for i in fracs]
+
 fig, ax = plt.subplots(figsize=(5,3.5))
 ax.plot(t, max_elev, label='Max elevation', color='r')
 ax.scatter(t[id_ts], max_elev[id_ts], color='r', s=10)
@@ -74,7 +76,9 @@ edge_frac_eros = np.abs(np.sum(edges_eros[1:-1,1:-1]))/len(edges_eros[1:-1,1:-1]
 print(edge_frac_dil,edge_frac_eros)
 
 plt.figure()
-plt.imshow(edges_eros, cmap='pink_r')
+plt.imshow(edges_dil, cmap='pink')
+plt.title(f'Limestone {fracs[1]}, fraction edges: {edge_frac_dil:0.3f}')
+plt.savefig(os.path.join(save_directory, id, f"edges.png"), dpi=300)
 # plt.colorbar()
 
 # %%

@@ -284,7 +284,7 @@ ds = xr.Dataset(
         "y": (("y"), mg.y_of_node.reshape(mg.shape)[:, 1], {"units": "meters"}),
         "time": (
             ("time"),
-            dt * np.arange(Ns) / 1e3,
+            dt * save_freq * np.arange(Ns) / 1e3,
             {"units": "thousands of years since model start", "standard_name": "time"},
         ),
     },
