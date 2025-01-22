@@ -1,8 +1,9 @@
 
 """
 Use the Lithology component to track two layers: a limestone layer, and a basement.
-Water is lost on the karst, but not returned. Effectively, the erodibility on the 
-two layers is different.
+
+Runoff: infiltration excess only. Option for a fraction of total water lost on the karst, but not returned. 
+Erodibility: Option for contrast in erodibility between karst and basement.
 """
 
 #%%
@@ -23,25 +24,26 @@ from landlab.components import (
 )
 
 save_directory = '/Users/dlitwin/Documents/Research Data/Local/karst_lem'
-filename = "virtual_karst_null_1"
-os.mkdir(os.path.join(save_directory,filename))
+filename = "virtual_karst_null_3"
+# os.mkdir(os.path.join(save_directory,filename))
 
 #%% parameters
 
 U = 1e-4 # uplift (m/yr)
 E_limestone = 0.0 #5e-5 # limestone surface chemical denudation rate (m/yr)
 E_weathered_basement = 0.0 # weathered basement surface chemical denudation rate (m/yr)
-K_sp = 1e-5 # streampower incision (yr^...)
+K_sp_limestone = 1e-5 # streampower incision (yr^...)
+K_sp_basement = 1e-5 # streampower incision (yr^...)
 m_sp = 0.5 # exponent on discharge
 n_sp = 1.0 # exponent on slope
 D_ld = 1e-3 # diffusivity (m2/yr)
 
-b_limestone = 50 # limestone unit thickness (m)
+b_limestone = 25 # limestone unit thickness (m)
 b_basement = 1000 # basement thickness (m)
 bed_dip = 0.000 #0.002 # dip of bed (positive = toward bottom boundary)
 
 r_tot = 1.0 #/ (3600 * 24 * 365) # total runoff m/yr
-ie_frac = 0.5 # fraction of r_tot that becomes overland flow on limestone. ie_frac on basement=1. 
+ie_frac = 1.0 # fraction of r_tot that becomes overland flow on limestone. ie_frac on basement=1. 
 
 T = 2e6 # total geomorphic time
 dt = 500 # geomorphic timestep (yr)
@@ -74,11 +76,13 @@ layer_elevations = [b_limestone,b_basement]
 layer_ids = [0,1]
 attrs = {
          "ie_frac": {0: ie_frac, 1: 1}, # fraction of r_tot that becomes infiltration excess runoff
-         "chemical_denudation_rate": {0: E_limestone, 1: E_weathered_basement}
+         "chemical_denudation_rate": {0: E_limestone, 1: E_weathered_basement},
+         "erodibility":{0: K_sp_limestone, 1: K_sp_basement}
          }
 
 lith = LithoLayers(
-    mg, layer_elevations, layer_ids, function=lambda x, y: - bed_dip * y + noise_scale*np.random.rand(len(y)), attrs=attrs  #- bed_dip * y
+    mg, layer_elevations, layer_ids, function=lambda x, y: - bed_dip * y, #+ noise_scale*np.random.rand(len(y)), 
+    attrs=attrs, layer_type='MaterialLayers',
 )
 dz_ad = np.zeros(mg.size("node"))
 dz_ad[mg.core_nodes] = U * dt
@@ -120,8 +124,8 @@ lmb = LakeMapperBarnes(
     ignore_overfill=True,
 )
 
-fs = FastscapeEroder(mg, K_sp=K_sp, m_sp=m_sp, n_sp=n_sp, discharge_field='ie_discharge')
-ld = LinearDiffuser(mg, linear_diffusivity=D_ld)
+fs = FastscapeEroder(mg, K_sp='erodibility', m_sp=m_sp, n_sp=n_sp, discharge_field='ie_discharge')
+ld = LinearDiffuser(mg, linear_diffusivity=D_ld)#, deposit=False)
 
 #%% xarray to save output
 
@@ -143,7 +147,8 @@ save_vals = ['limestone_exposed__area',
             'erosion__rate',
             ]
 df_out = pd.DataFrame(np.zeros((N,len(save_vals))), columns=save_vals)
-params = {'U':U, 'K':K_sp, 'D_ld':D_ld, 'm_sp':m_sp,'n_sp':n_sp, 
+params = {'U':U, 'K_limestone':K_sp_limestone, 'K_basement':K_sp_basement,
+        'D_ld':D_ld, 'm_sp':m_sp,'n_sp':n_sp, 
         'E_limestone': E_limestone, 'E_weathered_basement':E_weathered_basement,
         'b_limestone':b_limestone, 'b_basement':b_basement, 'bed_dip':bed_dip,
         'r_tot':r_tot, 'ie_frac':ie_frac, 
@@ -181,7 +186,7 @@ ds = xr.Dataset(
         "y": (("y"), mg.y_of_node.reshape(mg.shape)[:, 1], {"units": "meters"}),
         "time": (
             ("time"),
-            dt * np.arange(Ns) / 1e3,
+            dt * save_freq * np.arange(Ns) / 1e3,
             {"units": "thousands of years since model start", "standard_name": "time"},
         ),
     },
@@ -208,7 +213,7 @@ for i in tqdm(range(N)):
     z += dz_ad
 
     # update lithologic model, accounting erosion and advection (uplift)
-    lith.rock_id = 0
+    lith.rock_id = mg.at_node['rock_type__id'] # deposited material is the same as what was there before.
     lith.dz_advection = dz_ad
     lith.run_one_step()
 

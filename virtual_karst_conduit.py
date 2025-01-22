@@ -84,7 +84,8 @@ attrs = {
          }
 
 lith = LithoLayers(
-    mg, layer_elevations, layer_ids, function=lambda x, y: - bed_dip * y + noise_scale*np.random.rand(len(y)), attrs=attrs
+    mg, layer_elevations, layer_ids, function=lambda x, y: - bed_dip * y + noise_scale*np.random.rand(len(y)), 
+    layer_type='MaterialLayers', attrs=attrs,
 )
 dz_ad = np.zeros(mg.size("node"))
 dz_ad[mg.core_nodes] = U * dt
@@ -276,7 +277,7 @@ for i in tqdm(range(N)):
     z += dz_ad
 
     # update lithologic model, accounting erosion and advection (uplift)
-    lith.rock_id = 0
+    lith.rock_id = mg.at_node['rock_type__id'] # deposited material is the same as what was there before.
     lith.dz_advection = dz_ad
     lith.run_one_step()
 
