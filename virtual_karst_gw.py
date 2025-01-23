@@ -93,10 +93,11 @@ layer_elevations = [b_limestone,b_basement]
 layer_ids = [0,1]
 attrs = {
          "Ksat_node": {0: ksat_limestone, 1: ksat_basement}, 
+         "ie_frac": {0: ie_frac, 1: 1},
          "weathered_thickness": {0: b_weathered_basement, 1: b_weathered_basement}, # was 0.0 for limestone but this can lead to discontinuities.
          "porosity": {0: n_limestone, 1: n_weathered_basement},
          "chemical_denudation_rate": {0: E_limestone, 1: E_weathered_basement},
-         "erodibility":{0: K_sp_limestone, 1: K_sp_basement}
+         "erodibility":{0: K_sp_limestone, 1: K_sp_basement},
          }
 
 lith = LithoLayers(
@@ -272,6 +273,13 @@ bnds_upper = bnds[mg.shape[1]:]
 
 for i in tqdm(range(N)):
 
+    # map new ksat to link
+    ks[:] = map_value_at_max_node_to_link(mg, "water_table__elevation", "Ksat_node")
+
+    # partition infiltration excess, matrix recharge 
+    q_ie[mg.core_nodes] = r_tot * ie_frac[mg.core_nodes]
+    r_m[mg.core_nodes] = r_tot * (1 - ie_frac[mg.core_nodes])
+
     z0 = z.copy()
     # iterate for steady state water table
     wt_delta = 1.0
@@ -288,9 +296,9 @@ for i in tqdm(range(N)):
         wt_iter += 1
 
     # local runoff is sum of saturation and infiltration excess. Convert units to m/yr. 
-    q_local[mg.core_nodes] = (mg.at_node['average_surface_water__specific_discharge'][mg.core_nodes] + mg.at_node['infiltration_excess'][mg.core_nodes]) * 3600 * 24 * 365
+    q_local[mg.core_nodes] = (mg.at_node['average_surface_water__specific_discharge'][mg.core_nodes] + q_ie[mg.core_nodes]) * 3600 * 24 * 365
 
-    # update areas
+    # update areas, discharge on q_local ("local_runoff")
     fa.run_one_step()
 
     # update topography
@@ -305,9 +313,6 @@ for i in tqdm(range(N)):
 
     # remove depressions
     lmb.run_one_step()
-
-    # map new ksat to link
-    ks[:] = map_value_at_max_node_to_link(mg, "water_table__elevation", "Ksat_node")
 
     # update lower aquifer boundary condition
     zb[mg.core_nodes] = ((z - lith.z_bottom[1,:]) - mg.at_node["weathered_thickness"])[mg.core_nodes]
