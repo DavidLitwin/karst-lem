@@ -60,7 +60,7 @@ ie_frac = 0.5 # fraction of r_tot that becomes overland flow on limestone. ie_fr
 wt_delta_tol = 1e-6 # acceptable rate of water table change before moving on (m/s)
 dt_gw = 1 * 24 * 3600 # groundwater timestep (s)
 
-T = 1e6 # total geomorphic time (yr)
+T = 2e6 # total geomorphic time (yr)
 dt = 500 # geomorphic timestep (yr)
 N = int(T//dt) # number of geomorphic timesteps
 
@@ -277,8 +277,8 @@ for i in tqdm(range(N)):
     ks[:] = map_value_at_max_node_to_link(mg, "water_table__elevation", "Ksat_node")
 
     # partition infiltration excess, matrix recharge 
-    q_ie[mg.core_nodes] = r_tot * ie_frac[mg.core_nodes]
-    r_m[mg.core_nodes] = r_tot * (1 - ie_frac[mg.core_nodes])
+    q_ie[mg.core_nodes] = r_tot * mg.at_node["ie_frac"][mg.core_nodes]
+    r_m[mg.core_nodes] = r_tot * (1 - mg.at_node["ie_frac"][mg.core_nodes])
 
     z0 = z.copy()
     # iterate for steady state water table
