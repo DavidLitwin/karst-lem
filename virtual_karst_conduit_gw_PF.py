@@ -148,6 +148,8 @@ Q2 = mg.add_zeros("node", "karst_discharge")
 Q_tot = mg.add_zeros("node", "total_discharge")
 rock_ID = mg.at_node['rock_type__id']
 
+# keep track of total local denudation rate
+denudation = mg.add_zeros("node", "denudation__rate")
 
 #%% instantiate components 
 
@@ -198,6 +200,7 @@ output_fields = [
     "total_discharge",
     "horton_dunne_discharge",
     "karst_discharge",
+    "denudation__rate",
 ]
 save_vals = ['limestone_exposed__area',
             'mean_limestone__thickness',
@@ -271,6 +274,11 @@ ds = xr.Dataset(
             ("time", "y", "x"),
             np.empty((Ns, mg.shape[0], mg.shape[1])),
             {"units": "m3/s", "long_name": "Discharge from discrete karst system"},
+        ),
+        "denudation__rate": (
+            ("time", "y", "x"),
+            np.empty((Ns, mg.shape[0], mg.shape[1])),
+            {"units": "m/yr", "long_name": "Elevation change minus uplift over time"},
         ),
     },
     coords={
@@ -391,6 +399,10 @@ for i in tqdm(range(N)):
     df_out.loc[i,'mean_ie'] = np.mean(q_ie[mg.core_nodes])
     df_out.loc[i,'mean_r_conduit'] = np.mean(r_c[mg.core_nodes])
     df_out.loc[i,'mean_r_matrix'] = np.mean(r_m[mg.core_nodes])
+
+    # calculate denudation rate
+    denudation[mg.core_nodes] = -((z[mg.core_nodes] - z0[mg.core_nodes])/dt - U)
+
 
     if i%save_freq==0:
         for of in output_fields:

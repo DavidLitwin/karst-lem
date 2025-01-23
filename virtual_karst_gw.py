@@ -71,6 +71,8 @@ noise_scale = 0.1
 save_freq = 25 # steps between saving output
 Ns = N//save_freq
 
+# approximate maximum thickness of aquifer in limestone
+hmax = (r_tot*(1-ie_frac)*(0.5*Ny*dx))/(2*b_weathered_basement*ksat_limestone) 
 
 #%% set up grid and lithology
 
@@ -134,6 +136,9 @@ q_local = mg.add_zeros("node", "local_runoff")
 # add a field for exfiltration -- derived from local gdp runoff
 qe_local = mg.add_zeros("node", "exfiltration_rate")
 
+# keep track of total local denudation rate
+denudation = mg.add_zeros("node", "denudation__rate")
+
 h = mg.at_node['aquifer__thickness']
 
 #%%
@@ -179,6 +184,7 @@ output_fields = [
     "rock_type__id",
     "average_surface_water__specific_discharge",
     "surface_water__discharge",
+    "denudation__rate",
 ]
 save_vals = ['limestone_exposed__area',
             'mean_limestone__thickness',
@@ -246,6 +252,11 @@ ds = xr.Dataset(
             np.empty((Ns, mg.shape[0], mg.shape[1])),
             {"units": "m3/s", "long_name": "Discharge on topographic surface"},
         ),
+        "denudation__rate": (
+            ("time", "y", "x"),
+            np.empty((Ns, mg.shape[0], mg.shape[1])),
+            {"units": "m/yr", "long_name": "Elevation change minus uplift over time"},
+        ),
     },
     coords={
         "x": (
@@ -265,13 +276,13 @@ ds = ds.assign_attrs(params)
 
 #%% run forward
 
-df_out = pd.DataFrame(np.zeros((N,len(save_vals))), columns=save_vals)
 bnds = mg.fixed_value_boundary_nodes
 bnds_lower = bnds[0:mg.shape[1]]
 bnds_upper = bnds[mg.shape[1]:]
 
 for i in range(N):
-    
+
+    z0 = z.copy()
     # iterate for steady state water table
     wt_delta = 1
     wt_iter = 0
@@ -315,6 +326,9 @@ for i in range(N):
     # something to handle the aquifer itself - see regolith models in DupuitLEM
     # this should cover it, but again check boundary conditions
     h[mg.core_nodes] = (zwt - zb)[mg.core_nodes]
+
+    # calculate denudation rate
+    denudation[mg.core_nodes] = -((z[mg.core_nodes] - z0[mg.core_nodes])/dt - U)
 
     # save output
     if i%save_freq==0:

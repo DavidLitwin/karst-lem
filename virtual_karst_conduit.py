@@ -112,6 +112,8 @@ Q2 = mg.add_zeros("node", "karst_discharge")
 Q_tot = mg.add_zeros("node", "total_discharge")
 rock_ID = mg.at_node['rock_type__id']
 
+# keep track of total local denudation rate
+denudation = mg.add_zeros("node", "denudation__rate")
 
 #%% instantiate components 
 
@@ -169,6 +171,7 @@ output_fields = [
     "total_discharge",
     "ie_discharge",
     "karst_discharge",
+    "denudation__rate",
 ]
 save_vals = ['limestone_exposed__area',
             'mean_limestone__thickness',
@@ -221,6 +224,11 @@ ds = xr.Dataset(
             np.empty((Ns, mg.shape[0], mg.shape[1])),
             {"units": "m3/s", "long_name": "Discharge from karst"},
         ),
+        "denudation__rate": (
+            ("time", "y", "x"),
+            np.empty((Ns, mg.shape[0], mg.shape[1])),
+            {"units": "m/yr", "long_name": "Elevation change minus uplift over time"},
+        ),
     },
     coords={
         "x": (
@@ -243,6 +251,7 @@ ds = ds.assign_attrs(params)
 
 for i in tqdm(range(N)):
 
+    z0 = z.copy()
     # infiltration excess based on the fraction of r (p-e) that goes to ie. 
     q_ie[mg.core_nodes] = mg.at_node['ie_frac'][mg.core_nodes] * r_tot
     r[mg.core_nodes] = (1 - mg.at_node['ie_frac'][mg.core_nodes]) * r_tot
@@ -286,6 +295,9 @@ for i in tqdm(range(N)):
 
     # update the definition of the karst surface
     zk[:] = z-lith.z_top[0,:]
+
+    # calculate denudation rate
+    denudation[mg.core_nodes] = -((z[mg.core_nodes] - z0[mg.core_nodes])/dt - U)
 
     ######## Save output
 
