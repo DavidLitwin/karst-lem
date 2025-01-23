@@ -12,6 +12,7 @@ import os
 import numpy as np
 import pandas as pd
 import xarray as xr
+from tqdm import tqdm
 import matplotlib.pyplot as plt
 
 from landlab import RasterModelGrid
@@ -54,7 +55,7 @@ b_weathered_basement = 0.5 # thickness of regolith that can host aquifer in base
 
 r_tot = 1 / (3600 * 24 * 365) # total runoff m/s
 # ibar = 1e-3 / 3600 # mean storm intensity (m/s) equiv. 1 mm/hr 
-ie_frac = 0.1 # fraction of r_tot that becomes overland flow on limestone. ie_frac on basement=1. 
+ie_frac = 0.5 # fraction of r_tot that becomes overland flow on limestone. ie_frac on basement=1. 
 
 wt_delta_tol = 1e-6 # acceptable rate of water table change before moving on (m/s)
 dt_gw = 1 * 24 * 3600 # groundwater timestep (s)
@@ -139,10 +140,7 @@ qe_local = mg.add_zeros("node", "exfiltration_rate")
 # keep track of total local denudation rate
 denudation = mg.add_zeros("node", "denudation__rate")
 
-h = mg.at_node['aquifer__thickness']
-
 #%%
-
 
 gdp = GroundwaterDupuitPercolator(
     mg, 
@@ -186,25 +184,6 @@ output_fields = [
     "surface_water__discharge",
     "denudation__rate",
 ]
-save_vals = ['limestone_exposed__area',
-            'mean_limestone__thickness',
-            'mean_limestone__elevation',
-            'max_limestone__elevation',
-            'mean__elevation',
-            'max__elevation',
-            'denudation__rate',
-            'median_aquifer_thickness',
-            'discharge_lower',
-            'discharge_upper',
-            'area_lower',
-            'area_upper',
-            'limestone_upper',
-            'limestone_lower',
-            'wt_iterations',
-            'mean_ie',
-            'mean_r_matrix',
-            ]
-df_out = pd.DataFrame(np.zeros((N,len(save_vals))), columns=save_vals)
 params = {'U':U, 'K_limestone':K_sp_limestone, 'K_basement':K_sp_basement, 'D_ld':D_ld, 'm_sp':m_sp,
             'E_limestone': E_limestone, 'E_weathered_basement':E_weathered_basement,
             'n_sp':n_sp,
@@ -257,6 +236,16 @@ ds = xr.Dataset(
             np.empty((Ns, mg.shape[0], mg.shape[1])),
             {"units": "m/yr", "long_name": "Elevation change minus uplift over time"},
         ),
+        "wt_iterations": (
+            ("time"),
+            np.empty(Ns),
+            {"units": "-", "long_name": "iterations to solve water table"},
+        ),
+        "first_wtdelta": (
+            ("time"),
+            np.empty(Ns),
+            {"units": "m/s", "long_name": "rate of change of water table in first iteration"},
+        ),
     },
     coords={
         "x": (
@@ -267,7 +256,7 @@ ds = xr.Dataset(
         "y": (("y"), mg.y_of_node.reshape(mg.shape)[:, 1], {"units": "meters"}),
         "time": (
             ("time"),
-            dt * np.arange(Ns) / 1e3,
+            dt * save_freq * np.arange(Ns) / 1e3,
             {"units": "thousands of years since model start", "standard_name": "time"},
         ),
     },
@@ -276,16 +265,18 @@ ds = ds.assign_attrs(params)
 
 #%% run forward
 
+h = mg.at_node['aquifer__thickness']
 bnds = mg.fixed_value_boundary_nodes
 bnds_lower = bnds[0:mg.shape[1]]
 bnds_upper = bnds[mg.shape[1]:]
 
-for i in range(N):
+for i in tqdm(range(N)):
 
     z0 = z.copy()
     # iterate for steady state water table
-    wt_delta = 1
+    wt_delta = 1.0
     wt_iter = 0
+    wt_delta_0 = 0.0
     while wt_delta > wt_delta_tol:
 
         zwt0 = zwt.copy()
@@ -293,9 +284,8 @@ for i in range(N):
         wt_delta = np.max(np.abs(zwt0 - zwt))/dt_gw
 
         if wt_iter == 0:
-            df_out['first_wtdelta'].loc[i] = wt_delta
+            wt_delta_0 = wt_delta
         wt_iter += 1
-    df_out['wt_iterations'].loc[i] = wt_iter
 
     # local runoff is sum of saturation and infiltration excess. Convert units to m/yr. 
     q_local[mg.core_nodes] = (mg.at_node['average_surface_water__specific_discharge'][mg.core_nodes] + mg.at_node['infiltration_excess'][mg.core_nodes]) * 3600 * 24 * 365
@@ -334,6 +324,8 @@ for i in range(N):
     if i%save_freq==0:
         for of in output_fields:
             ds[of][i//save_freq, :, :] = mg["node"][of].reshape(mg.shape)
+        ds['wt_iterations'][i//save_freq] = wt_iter
+        ds['first_wtdelta'][i//save_freq] = wt_delta_0
 
 ds.to_netcdf(os.path.join(save_directory, filename, f"{filename}.nc"))
 

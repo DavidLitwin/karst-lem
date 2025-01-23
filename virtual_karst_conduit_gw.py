@@ -219,26 +219,7 @@ output_fields = [
     "karst_discharge",
     "denudation__rate",
 ]
-save_vals = ['limestone_exposed__area',
-            'mean_limestone__thickness',
-            'mean_limestone__elevation',
-            'max_limestone__elevation',
-            'mean__elevation',
-            'max__elevation',
-            'denudation__rate',
-            'median_aquifer_thickness',
-            'discharge_lower',
-            'discharge_upper',
-            'area_lower',
-            'area_upper',
-            'limestone_upper',
-            'limestone_lower',
-            'wt_iterations',
-            'mean_ie',
-            'mean_r_conduit',
-            'mean_r_matrix',
-            ]
-df_out = pd.DataFrame(np.zeros((N,len(save_vals))), columns=save_vals)
+
 params = {'U':U, 'K_limestone':K_sp_limestone, 'K_basement':K_sp_basement, 'D_ld':D_ld, 'm_sp':m_sp,
             'E_limestone': E_limestone, 'E_weathered_basement':E_weathered_basement,
             'n_sp':n_sp, 'conduit_frac':conduit_frac,
@@ -296,6 +277,16 @@ ds = xr.Dataset(
             np.empty((Ns, mg.shape[0], mg.shape[1])),
             {"units": "m/yr", "long_name": "Elevation change minus uplift over time"},
         ),
+        "wt_iterations": (
+            ("time"),
+            np.empty(Ns),
+            {"units": "-", "long_name": "iterations to solve water table"},
+        ),
+        "first_wtdelta": (
+            ("time"),
+            np.empty(Ns),
+            {"units": "m/s", "long_name": "rate of change of water table in first iteration"},
+        ),
     },
     coords={
         "x": (
@@ -335,12 +326,11 @@ for i in tqdm(range(N)):
         while wt_delta > wt_delta_tol:
             zwt0 = zwt.copy()
             gdp.run_with_adaptive_time_step_solver(dt_gw)
-            wt_delta = np.max(np.abs(zwt0 - zwt))/dt_gw
+        wt_delta = np.max(np.abs(zwt0 - zwt))/dt_gw
 
-            # if wt_iter == 0:
-            #     df_out['first_wtdelta'].loc[i] = wt_delta
-            wt_iter += 1
-        df_out.loc[i, 'wt_iterations'] = wt_iter
+        if wt_iter == 0:
+            wt_delta_0 = wt_delta
+        wt_iter += 1
     # else:
     #     h[:] = np.zeros_like(h)
     #     zwt[:] = zb
@@ -400,37 +390,16 @@ for i in tqdm(range(N)):
 
     ######## Save output
 
-    # save change metrics
-    df_out.loc[i,'limestone_exposed__area'] = np.sum(mg.at_node['rock_type__id'][mg.core_nodes]==0)/len(mg.core_nodes)
-    df_out.loc[i,'mean_limestone__thickness'] = np.mean(lith.z_bottom[1,:][mg.at_node['rock_type__id']==0])
-    df_out.loc[i,'mean_limestone__elevation'] = np.mean(z[mg.at_node['rock_type__id']==0])
-    df_out.loc[i,'mean__elevation'] = np.mean(z[mg.core_nodes])
-    df_out.loc[i,'max__elevation'] = np.max(z[mg.core_nodes])
-    df_out.loc[i,'denudation__rate'] = -np.mean((z - z0 - U*dt)[mg.core_nodes])
-    df_out.loc[i,'median_aquifer_thickness'] = np.median(h[mg.core_nodes])
-    # at, ab = get_lower_upper_area(mg, bottom_nodes, top_nodes)
-    # df_out.loc[i,'area_lower'] = ab
-    # df_out.loc[i,'area_upper'] = at
-    # Qt, Qb = get_lower_upper_water_flux(mg, bottom_nodes, top_nodes)
-    # df_out.loc[i,'discharge_lower'] = Qb
-    # df_out.loc[i,'discharge_upper'] = Qt
-    df_out.loc[i,'mean_ie'] = np.mean(q_ie[mg.core_nodes])
-    df_out.loc[i,'mean_r_conduit'] = np.mean(r_c[mg.core_nodes])
-    df_out.loc[i,'mean_r_matrix'] = np.mean(r_m[mg.core_nodes])
-
     # calculate denudation rate
     denudation[mg.core_nodes] = -((z[mg.core_nodes] - z0[mg.core_nodes])/dt - U)
 
     if i%save_freq==0:
         for of in output_fields:
             ds[of][i//save_freq, :, :] = mg["node"][of].reshape(mg.shape)
-
+        ds['wt_iterations'][i//save_freq] = wt_iter
+        ds['first_wtdelta'][i//save_freq] = wt_delta_0
 
 ds.to_netcdf(os.path.join(save_directory, filename, f"{filename}.nc"))
-
-df_out['time'] = np.arange(0, N*dt, dt)
-df_out.set_index('time', inplace=True)
-df_out.to_csv(os.path.join(save_directory, filename, f"output_{filename}.csv"))
 
 
 # %% plot topographic change
