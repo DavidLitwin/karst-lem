@@ -17,7 +17,7 @@ fig_directory = '/Users/dlitwin/Documents/Research/Karst landscape evolution/lan
 save_directory = '/Users/dlitwin/Documents/Research Data/Local/karst_lem'
 # id = "virtual_karst_null_7"
 # id = 'virtual_karst_conduit_4'
-id = 'virtual_karst_gw_3'
+id = 'virtual_karst_gw_1'
 
 #%%
 
@@ -72,7 +72,7 @@ cb3 = fig.colorbar(im3, ax=axs[2,:], label='Erosion (mm/yr)', shrink=0.8)
 cb2.set_ticks([0.25,0.75], labels=['Carbonate','Basement'])
 cb3.set_ticks([0.0, 0.1,0.5*np.max(denud)*1e3])
 # fig.tight_layout()
-# plt.savefig(os.path.join(save_directory, id, f"elev_frac_space.png"), dpi=300)
+plt.savefig(os.path.join(save_directory, id, f"elev_frac_space.png"), dpi=300)
 
 # %%
 
@@ -117,4 +117,63 @@ for i, id_t in enumerate(id_ts):
     
 fig.tight_layout()
 plt.savefig(os.path.join(save_directory, id, f"profile_frac_space.png"), dpi=300)
+
+
+# %% cross-run comparisons
+
+runs_all = {}
+runs = ['virtual_karst_null_1', 'virtual_karst_null_2', 'virtual_karst_null_3']
+for run in runs:
+    file = os.path.join(save_directory,run,f'{run}.nc')
+    runs_all[run] = Dataset(file, "r", format="NETCDF4")
+
+cmap1 = plt.cm.get_cmap('Blues_r', len(runs)+2)
+fracs = [0.9, 0.5, 0.1]
+fig, ax = plt.subplots(figsize=(5,3.5))
+for j, run in enumerate(runs):
+
+    var = runs_all[run].ie_frac
+    t = runs_all[run]['time'][:].data
+    rid = runs_all[run].variables['rock_type__id'][:,:,:].data
+    frac_limestone = 1 - np.mean(rid[:,1:-1,1:-1], axis=(1,2))
+    id_ts = [np.argmin(np.absolute(frac_limestone-i)) for i in fracs]
+    ax.plot(t, frac_limestone, label=f'{var:0.2f}', color=cmap1(j+1))
+    # ax.scatter(t[id_ts], frac_limestone[id_ts], color='b', s=10)
+
+ax.set_ylabel('Fraction exposed (-)')
+ax.set_xlabel('Time (kyr)')
+ax.set_title(f'Model: {run[14:-2]}, Vary: ie_frac')
+ax.legend(frameon=False)
+plt.savefig(os.path.join(save_directory, runs[0], f"exposed_frac_time_ie_frac.png"), dpi=300)
+
+#%%
+
+runs_all = {}
+runs = ['virtual_karst_null_1', 'virtual_karst_gw_1', 'virtual_karst_conduit_1']
+colors = ['k', 'b', 'r']
+for run in runs:
+    file = os.path.join(save_directory,run,f'{run}.nc')
+    runs_all[run] = Dataset(file, "r", format="NETCDF4")
+
+# cmap1 = plt.cm.get_cmap('Blues_r', len(runs)+2)
+fracs = [0.9, 0.5, 0.1]
+fig, ax = plt.subplots(figsize=(5,3.5))
+for j, run in enumerate(runs):
+
+    var = run[14:-2]
+    print(runs_all[run].ie_frac)
+    t = runs_all[run]['time'][:].data
+    rid = runs_all[run].variables['rock_type__id'][:,:,:].data
+    frac_limestone = 1 - np.mean(rid[:,1:-1,1:-1], axis=(1,2))
+    id_ts = [np.argmin(np.absolute(frac_limestone-i)) for i in fracs]
+    ax.plot(t, frac_limestone, label=f'{var}', color=colors[j]) # color=cmap1(j+1)
+    # ax.scatter(t[id_ts], frac_limestone[id_ts], color='b', s=10)
+
+ax.set_ylabel('Fraction exposed (-)')
+ax.set_xlabel('Time (kyr)')
+ax.set_title(f'Vary model, ie_frac = {runs_all[run].ie_frac:.2f}')
+ax.legend(frameon=False)
+plt.savefig(os.path.join(save_directory, runs[0], f"exposed_frac_time_model.png"), dpi=300)
+
+
 # %%

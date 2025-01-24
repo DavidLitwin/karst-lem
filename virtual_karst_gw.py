@@ -158,7 +158,7 @@ fa = FlowAccumulator(
 )
 lmb = LakeMapperBarnes(
     mg,
-    method="Steepest",
+    method="D8",
     fill_flat=False,
     surface="topographic__elevation",
     fill_surface="topographic__elevation",
@@ -296,8 +296,11 @@ for i in tqdm(range(N)):
         wt_iter += 1
 
     # local runoff is sum of saturation and infiltration excess. Convert units to m/yr. 
-    q_local[mg.core_nodes] = (mg.at_node['average_surface_water__specific_discharge'][mg.core_nodes] + q_ie[mg.core_nodes]) * 3600 * 24 * 365
+    q_local[mg.core_nodes] = (mg.at_node['surface_water__specific_discharge'][mg.core_nodes] + q_ie[mg.core_nodes]) * 3600 * 24 * 365
 
+    # remove depressions
+    lmb.run_one_step()
+    
     # update areas, discharge on q_local ("local_runoff")
     fa.run_one_step()
 
@@ -310,9 +313,6 @@ for i in tqdm(range(N)):
     lith.rock_id = mg.at_node['rock_type__id'] # deposited material is the same as what was there before.
     lith.dz_advection = dz_ad
     lith.run_one_step()
-
-    # remove depressions
-    lmb.run_one_step()
 
     # update lower aquifer boundary condition
     zb[mg.core_nodes] = ((z - lith.z_bottom[1,:]) - mg.at_node["weathered_thickness"])[mg.core_nodes]

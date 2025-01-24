@@ -81,7 +81,7 @@ attrs = {
          }
 
 lith = LithoLayers(
-    mg, layer_elevations, layer_ids, function=lambda x, y: - bed_dip * y, #+ noise_scale*np.random.rand(len(y)), 
+    mg, layer_elevations, layer_ids, function=lambda x, y: - bed_dip * y + noise_scale*np.random.rand(len(y)), 
     attrs=attrs, layer_type='MaterialLayers',
 )
 dz_ad = np.zeros(mg.size("node"))
