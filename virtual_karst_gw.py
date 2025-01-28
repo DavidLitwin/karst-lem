@@ -45,7 +45,7 @@ D_ld = 1e-3 # diffusivity (m2/yr)
 
 b_limestone = 25 # limestone unit thickness (m)
 b_basement = 1000 # basement thickness (m)
-bed_dip = 0.0 #0.002 # dip of bed (positive = toward bottom boundary)
+bed_dip = -0.01 #0.002 # dip of bed (positive = toward bottom boundary (landlab imshow orientation))
 
 ksat_limestone = 1.5e-5 # ksat limestone (m/s) ksat=1.5e-5 similar to sauter (1992) Fissured limestone
 ksat_basement = 1e-6 # ksat basement (m/s) # 1e-7: fine grained sedimentary (Gleeson)
@@ -324,6 +324,9 @@ for i in tqdm(range(N)):
 
     # calculate denudation rate
     denudation[mg.core_nodes] = -((z[mg.core_nodes] - z0[mg.core_nodes])/dt - U)
+
+    # update the contact elevation
+    zk[:] = z-lith.z_top[0,:]
 
     # save output
     if i%save_freq==0:

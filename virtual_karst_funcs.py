@@ -1,7 +1,9 @@
 
 import copy
 import numpy as np
+from scipy import ndimage
 
+from landlab import RasterModelGrid
 from landlab.utils import get_watershed_mask
 from landlab.grid.mappers import map_max_of_node_links_to_node
 from landlab.components import (
@@ -294,3 +296,42 @@ def calc_P_gaussian(z, P0=0.5, A=2.0, Hp=2000, Dv=1000):
 #     P = P0 + A * np.exp((z-Hp)**2/(2*Dv**2))
     
 #     return P
+
+def locate_drainage_divide(elev, dx):
+    
+    mg = RasterModelGrid(elev.shape, xy_spacing=dx)
+    mg.set_closed_boundaries_at_grid_edges(right_is_closed=True,
+                                        left_is_closed=True,
+                                        top_is_closed=False,
+                                        bottom_is_closed=False)
+    bottom_nodes = mg.nodes_at_bottom_edge
+
+    z = mg.add_zeros("node", "topographic__elevation")
+    z[:] = elev.flatten()
+
+    fa = FlowAccumulator(
+        mg,
+        surface="topographic__elevation",
+        flow_director="D8",
+    )
+    lmb = LakeMapperBarnes(
+        mg,
+        method="D8",
+        fill_flat=False,
+        surface="topographic__elevation",
+        fill_surface="topographic__elevation",
+        redirect_flow_steepest_descent=False,
+        reaccumulate_flow=False,
+        track_lakes=False,
+        ignore_overfill=True,
+    )
+
+    # remove depressions, calculate flow directions and area
+    lmb.run_one_step()
+    fa.run_one_step()
+
+    lower_mask = get_divide_mask(mg, bottom_nodes).reshape(elev.shape)
+    edges_dil = lower_mask - ndimage.binary_dilation(lower_mask)
+
+    return edges_dil, lower_mask
+# %%
