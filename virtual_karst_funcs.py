@@ -3,13 +3,15 @@ import copy
 import numpy as np
 from scipy import ndimage
 
-from landlab import RasterModelGrid
+from landlab import RasterModelGrid, LinkStatus
 from landlab.utils import get_watershed_mask
 from landlab.grid.mappers import map_max_of_node_links_to_node
 from landlab.components import (
     FlowAccumulator,
     LakeMapperBarnes,
+    ChiFinder,
 )
+from landlab.grid.mappers import map_downwind_node_link_max_to_node
 
 def find_nearest(array, value):
     """Return index and value nearest to a value in an array."""
@@ -334,4 +336,66 @@ def locate_drainage_divide(elev, dx):
     edges_dil = lower_mask - ndimage.binary_dilation(lower_mask)
 
     return edges_dil, lower_mask
-# %%
+
+def calc_slope_d4(elev, dx):
+
+    mg = RasterModelGrid(elev.shape, xy_spacing=dx)
+    mg.set_closed_boundaries_at_grid_edges(right_is_closed=True,
+                                        left_is_closed=True,
+                                        top_is_closed=False,
+                                        bottom_is_closed=False)
+
+    z = mg.add_zeros("node", "topographic__elevation")
+    z[:] = elev.flatten()
+
+    # S8 = mg.add_zeros('node', 'slope_D8')
+    S4 = mg.add_zeros('node', 'slope_D4')
+
+    #slope for steepness is the absolute value of D8 gradient associated with
+    #flow direction. Same as FastscapeEroder. curvature is divergence of gradient.
+    #Same as LinearDiffuser. TI is done both ways.
+    # dzdx_D8 = mg.calc_grad_at_d8(elev)
+    dzdx_D4 = mg.calc_grad_at_link(elev)
+    dzdx_D4[mg.status_at_link == LinkStatus.INACTIVE] = 0.0
+    # S8[:] = abs(dzdx_D8[mg.at_node['flow__link_to_receiver_node']])
+    S4[:] = map_downwind_node_link_max_to_node(mg, dzdx_D4)
+
+    return S4.reshape(elev.shape)
+
+def calc_chi(elev, dx, **kwargs):
+
+    mg = RasterModelGrid(elev.shape, xy_spacing=dx)
+    mg.set_closed_boundaries_at_grid_edges(right_is_closed=True,
+                                        left_is_closed=True,
+                                        top_is_closed=False,
+                                        bottom_is_closed=False)
+    bottom_nodes = mg.nodes_at_bottom_edge
+
+    z = mg.add_zeros("node", "topographic__elevation")
+    z[:] = elev.flatten()
+
+    fa = FlowAccumulator(
+        mg,
+        surface="topographic__elevation",
+        flow_director="D8",
+    )
+    lmb = LakeMapperBarnes(
+        mg,
+        method="D8",
+        fill_flat=False,
+        surface="topographic__elevation",
+        fill_surface="topographic__elevation",
+        redirect_flow_steepest_descent=False,
+        reaccumulate_flow=False,
+        track_lakes=False,
+        ignore_overfill=True,
+    )
+
+    # remove depressions, calculate flow directions and area
+    lmb.run_one_step()
+    fa.run_one_step()
+
+    cf = ChiFinder(mg, **kwargs)
+    cf.calculate_chi()
+
+    return mg.at_node["channel__chi_index"]
