@@ -168,7 +168,7 @@ lmb = LakeMapperBarnes(
     ignore_overfill=True,
 )
 
-fs = FastscapeEroder(mg, K_sp='erodibility', discharge_field='surface_water__discharge')
+fs = FastscapeEroder(mg, K_sp='erodibility', m_sp=m_sp, n_sp=n_sp, discharge_field='surface_water__discharge')
 ld = LinearDiffuser(mg, linear_diffusivity=D_ld)
 
 lmb.run_one_step()
