@@ -10,6 +10,7 @@ from landlab.components import (
     FlowAccumulator,
     LakeMapperBarnes,
     ChiFinder,
+    ChannelProfiler,
 )
 from landlab.grid.mappers import map_downwind_node_link_max_to_node
 
@@ -299,17 +300,20 @@ def calc_P_gaussian(z, P0=0.5, A=2.0, Hp=2000, Dv=1000):
     
 #     return P
 
-def locate_drainage_divide(elev, dx):
-    
+def make_grid(elev, dx):
+
     mg = RasterModelGrid(elev.shape, xy_spacing=dx)
     mg.set_closed_boundaries_at_grid_edges(right_is_closed=True,
                                         left_is_closed=True,
                                         top_is_closed=False,
                                         bottom_is_closed=False)
-    bottom_nodes = mg.nodes_at_bottom_edge
 
     z = mg.add_zeros("node", "topographic__elevation")
     z[:] = elev.flatten()
+
+    return mg
+
+def calc_flow_directions(mg):
 
     fa = FlowAccumulator(
         mg,
@@ -332,6 +336,15 @@ def locate_drainage_divide(elev, dx):
     lmb.run_one_step()
     fa.run_one_step()
 
+    return mg
+
+
+def locate_drainage_divide(elev, dx):
+ 
+    mg1 = make_grid(elev, dx)
+    mg = calc_flow_directions(mg1)
+    bottom_nodes = mg.nodes_at_bottom_edge
+
     lower_mask = get_divide_mask(mg, bottom_nodes).reshape(elev.shape)
     edges_dil = lower_mask - ndimage.binary_dilation(lower_mask)
 
@@ -339,14 +352,7 @@ def locate_drainage_divide(elev, dx):
 
 def calc_slope_d4(elev, dx):
 
-    mg = RasterModelGrid(elev.shape, xy_spacing=dx)
-    mg.set_closed_boundaries_at_grid_edges(right_is_closed=True,
-                                        left_is_closed=True,
-                                        top_is_closed=False,
-                                        bottom_is_closed=False)
-
-    z = mg.add_zeros("node", "topographic__elevation")
-    z[:] = elev.flatten()
+    mg = make_grid(elev, dx)
 
     # S8 = mg.add_zeros('node', 'slope_D8')
     S4 = mg.add_zeros('node', 'slope_D4')
@@ -364,38 +370,25 @@ def calc_slope_d4(elev, dx):
 
 def calc_chi(elev, dx, **kwargs):
 
-    mg = RasterModelGrid(elev.shape, xy_spacing=dx)
-    mg.set_closed_boundaries_at_grid_edges(right_is_closed=True,
-                                        left_is_closed=True,
-                                        top_is_closed=False,
-                                        bottom_is_closed=False)
-    bottom_nodes = mg.nodes_at_bottom_edge
-
-    z = mg.add_zeros("node", "topographic__elevation")
-    z[:] = elev.flatten()
-
-    fa = FlowAccumulator(
-        mg,
-        surface="topographic__elevation",
-        flow_director="D8",
-    )
-    lmb = LakeMapperBarnes(
-        mg,
-        method="D8",
-        fill_flat=False,
-        surface="topographic__elevation",
-        fill_surface="topographic__elevation",
-        redirect_flow_steepest_descent=False,
-        reaccumulate_flow=False,
-        track_lakes=False,
-        ignore_overfill=True,
-    )
-
-    # remove depressions, calculate flow directions and area
-    lmb.run_one_step()
-    fa.run_one_step()
+    mg1 = make_grid(elev, dx)
+    mg = calc_flow_directions(mg1)
 
     cf = ChiFinder(mg, **kwargs)
     cf.calculate_chi()
 
     return mg.at_node["channel__chi_index"]
+
+def find_channel_profiles(elev, dx, **kwargs):
+
+    mg1 = make_grid(elev, dx)
+    mg = calc_flow_directions(mg1)
+
+    profiler = ChannelProfiler(
+        mg,
+        number_of_watersheds=5,
+        minimum_channel_threshold=100*dx**2,
+        main_channel_only=True,
+        )
+    profiler.run_one_step()
+
+    return profiler.data_structure
