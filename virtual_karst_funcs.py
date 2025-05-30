@@ -388,6 +388,7 @@ def find_channel_profiles(elev, dx, **kwargs):
         number_of_watersheds=5,
         minimum_channel_threshold=100*dx**2,
         main_channel_only=True,
+        **kwargs,
         )
     profiler.run_one_step()
 
