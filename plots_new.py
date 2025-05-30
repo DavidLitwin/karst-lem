@@ -14,15 +14,15 @@ from netCDF4 import Dataset
 from scipy import ndimage
 import joypy
 
-from virtual_karst_funcs import locate_drainage_divide, calc_slope_d4, calc_chi
+from virtual_karst_funcs import *
 
 
 fig_directory = '/Users/dlitwin/Documents/Research/Karst landscape evolution/landlab_virtual_karst/figures'
 save_directory = '/Users/dlitwin/Documents/Research Data/Local/karst_lem'
-id = "virtual_karst_null_9"
-# id = 'virtual_karst_conduit_8'
+# id = "virtual_karst_null_8"
+id = 'virtual_karst_conduit_13'
 # id = 'virtual_karst_gw_8'
-model = id[14:-2]
+model = id.split('_')[-2]
 dx = 50
 
 #%% Load data
@@ -51,9 +51,9 @@ max_elev = np.max(elev[:,1:-1,1:-1], axis=(1,2))
 frac_limestone = 1 - np.mean(rid[:,1:-1,1:-1], axis=(1,2))
 
 # times = [500, 1000, 1500]
-# times = [1000, 1750, 2500]
+times = [1000, 1750, 2500]
 # times = [2000, 3000, 4000]
-times = [1000, 2500, 4000]
+# times = [1000, 2500, 4000]
 id_ts_1 = [np.argmin(np.absolute(t-i)) for i in times]
 
 fracs = [0.9, 0.5, 0.1]
@@ -147,7 +147,7 @@ plt.savefig(os.path.join(save_directory, id, f"elev_cdfs.png"), dpi=300)
 
 #%% Sequence of kernel density plots of elevation
 
-for i in [50, 100, 150]:
+for i in [20, 50, 100, 150]:
     data = elev[i::10,1:-1,1:-1]
     t1 = t[i::10]
     x = np.ones(data.shape) * t1.reshape(t1.shape[0],1,1)
@@ -159,11 +159,11 @@ for i in [50, 100, 150]:
                             grid="y", linewidth=1, legend=False, figsize=(6,5),
                             title=f'model:{model}, ie_frac = {fp.ie_frac:.2f}',
                             colormap=plt.cm.autumn_r, alpha=0.7)
-    for i, ax in enumerate(axes[:-1]):
+    for j, ax in enumerate(axes[:-1]):
         # ax.axvline(np.mean(data,axis=(1,2))[i],0)
-        ax.scatter(np.mean(data,axis=(1,2))[i], 0, color='k')
+        ax.scatter(np.mean(data,axis=(1,2))[j], 0, color='k')
         # ax.scatter(np.max(data,axis=(1,2))[i], 0)
-        ax.scatter(t1[i]*1e3 * fp.U, 0, color='b')
+        ax.scatter(t1[j]*1e3 * fp.U, 0, color='b')
         # ax.set_xlim(-20,400)
     # axes[len(axes)//2].set_ylabel('Time (kyr)')
     plt.xlabel('Elevation (m)')
@@ -341,6 +341,39 @@ plt.imshow(divide_image, interpolation=None)
 # maximum steady-state relief across both (based on chi-p and steepness, assuming water is all lost and not returned)?
 
 # seepage and seepage diffusive erosion
+
+#%% channel profiles
+
+
+# i = 100 #id_ts_1[1]
+
+
+n = 20
+dn = 20
+cmap1 = plt.get_cmap('viridis', n+2)
+plt.figure()
+for i in range(1,n): #range(1,n-1):
+    mg1 = make_grid(elev[i*dn,:,:], dx)
+    mg = calc_flow_directions(mg1)
+
+    profiler = ChannelProfiler(
+        mg,
+        number_of_watersheds=1,
+        # outlet_nodes=[14928],
+        # minimum_channel_threshold=100*dx**2,
+        main_channel_only=True,
+        )
+    profiler.run_one_step()
+
+    profiler.plot_profiles(
+        xlabel="Distance (m)",
+        ylabel="Elevation (m)",
+        title=f"Main Channel, model:{model}",
+        color=cmap1(i))
+# plt.xlim(0,1000)
+plt.ylim(0,500)
+plt.show()
+
 
 # %% cross-run comparisons
 
