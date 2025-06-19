@@ -16,8 +16,10 @@ class ScarpProfileModel:
                  n_sp=1.5, 
                  exp_hack=1.67, 
                  coef_hack=6.69, 
+                 r_limestone=1.0,
+                 r_basement=1.0,
                  Sc=None, 
-                 z_spring=0.0, 
+                 z_contact=0.0, 
                  q_spring=0.0,
                  ):
     
@@ -29,15 +31,18 @@ class ScarpProfileModel:
 
         self.exp_hack = exp_hack
         self.coef_hack = coef_hack
+        self.r_l = r_limestone
+        self.r_b = r_basement
         self.Sc = Sc
         self.q_spring = q_spring
-        self.z_spring = z_spring
+        self.z_contact = z_contact
 
         self.fa = FlowAccumulator(grid)
         self.fs = FastscapeEroder(grid, K_sp=K_sp, m_sp=m_sp, n_sp=n_sp, discharge_field='surface_water__discharge')
 
         self.area = grid.at_node['drainage_area']
-        self.Q = grid.at_node['surface_water__discharge']
+        self.Q_hack = grid.at_node['surface_water__discharge']
+        self.A_hack = np.zeros_like(self.area)
 
     def reduce_to_critical_slope(self):
         z_core = self.z[self.core_row]
@@ -51,14 +56,30 @@ class ScarpProfileModel:
         
         self.z[self.core_row] = z_new
 
+    def calc_discharge(self):
+
+        cond = np.logical_and(self.core_row, self.z<=self.z_contact)
+        self.A_hack = self.coef_hack * self.x_dist**self.exp_hack
+        self.A_contact = self.A_hack[self.core_row][np.argmin(abs(self.z[self.core_row] - self.z_contact))]
+
+        if self.r_l == self.r_b:
+            self.Q_hack[:] = self.r_l * self.A_hack
+            if self.q_spring > 0.0:
+                self.Q_hack[cond] += self.q_spring
+        else:
+            cond_r = np.logical_and(self.core_row, self.z>self.z_contact)
+
+            self.Q_hack[cond_r] = self.r_l * self.A_hack[cond_r]
+            self.Q_hack[cond] = self.r_l * self.A_contact + self.r_b * (self.A_hack[cond] - self.A_contact)
+            if self.q_spring > 0.0:
+                self.Q_hack[cond] += self.q_spring
+
     def run_step(self, dt):
 
         self.fa.run_one_step()
-        x_dist = self.area/self.dx**2
+        self.x_dist = self.area/self.dx**2
 
-        self.Q[:] = self.coef_hack * x_dist**self.exp_hack
-        if self.q_spring > 0.0:
-            self.Q[np.logical_and(self.core_row, self.z<=self.z_spring)] = self.Q[np.logical_and(self.core_row, self.z<=self.z_spring)] + self.q_spring
+        self.calc_discharge()
 
         self.fs.run_one_step(dt)
         if self.Sc is not None:
@@ -67,7 +88,8 @@ class ScarpProfileModel:
     def finalize_step(self):
 
         self.z_out = self.z[self.core_row]
-        self.Q_out = self.Q[self.core_row]
+        self.Q_out = self.Q_hack[self.core_row]
+        self.A_out = self.A_hack[self.core_row]
 
     def run_model(self, T, dt):
 
@@ -77,6 +99,7 @@ class ScarpProfileModel:
 
         self.z_all = np.zeros((N,len(self.z[self.core_row])))
         self.Q_all = np.zeros((N,len(self.z[self.core_row])))
+        self.A_contact_all = np.zeros(N)
 
         for i in range(N):
 
@@ -85,9 +108,11 @@ class ScarpProfileModel:
 
             self.z_all[i,:] = self.z_out
             self.Q_all[i,:] = self.Q_out
+            self.A_contact_all[i] = self.A_contact
             
 
         self.x_divide = self.x_pos[np.argmax(self.z_all, axis=1)]
+        self.x_contact = self.x_pos[np.argmin(np.absolute(self.z_all - self.z_contact), axis=1)]
         if (self.x_divide == np.max(self.x_pos)).any():
             print('Scarp reached boundary. Velocity only calculated on points prior.')
 
